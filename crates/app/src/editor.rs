@@ -22,6 +22,8 @@ enum Asking {
 
 pub struct Editor {
     pub form: Form,
+    pub calendar_id: i64,
+    pub calendars: Vec<calendio_core::calendars::Calendar>,
     /// The stored event when editing one.
     series: Option<Event>,
     start_time: String,
@@ -48,6 +50,8 @@ impl Editor {
             _ => "10".into(),
         };
         Editor {
+            calendar_id: 1,
+            calendars: Vec::new(),
             start_time: form.start.format("%H:%M").to_string(),
             end_time: form.end.format("%H:%M").to_string(),
             count,
@@ -99,6 +103,18 @@ impl Editor {
             .frame(egui::Frame::window(&ctx.global_style()).inner_margin(20.0))
             .show(ctx, |ui| {
                 ui.set_width(420.0);
+                let name = self
+                    .calendars
+                    .iter()
+                    .find(|c| c.id == self.calendar_id)
+                    .map(|c| c.name.as_str())
+                    .unwrap_or("Personal");
+                egui::ComboBox::from_id_salt("event-calendar").selected_text(name).show_ui(ui, |ui| {
+                    for calendar in &self.calendars {
+                        ui.selectable_value(&mut self.calendar_id, calendar.id, &calendar.name);
+                    }
+                });
+                ui.add_space(10.0);
                 out = self.body(ui);
             });
         if out.is_none() && modal.should_close() && self.asking.is_none() {

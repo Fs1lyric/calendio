@@ -3,7 +3,7 @@
 A local-first calendar and booking app. Native Rust desktop UI, SQLite storage,
 and a separate booking server that stays available when the window closes.
 
-**Status:** working foundation inherited from Calendi, with independent app
+**Status:** calendar and booking app under active development, with independent app
 identity and storage. This is not yet feature parity with Google Calendar or
 Calendly. See [ROADMAP.md](ROADMAP.md) for the remaining product scope.
 
@@ -11,6 +11,8 @@ Calendly. See [ROADMAP.md](ROADMAP.md) for the remaining product scope.
 
 ```sh
 cargo run -p calendio
+# Or open a specific view:
+cargo run -p calendio -- --view agenda
 cargo run -p calendio-booker -- --port 8788
 ```
 
@@ -22,7 +24,12 @@ service is deployed by creating this repository.
 
 ## Available now
 
-- Month, week, and day views; click to create/edit and drag to move events.
+- Month, week, day, 30-day agenda, and year overview.
+- Multiple calendars with names, colors, visibility, event assignment and safe removal.
+- Literal, case-insensitive Unicode search across event titles and notes.
+- ICS file import/export, including recurring events and exceptions; see
+  [interchange support](docs/ical.md).
+- Click to create/edit and drag to move events.
 - All-day events, event colors and notes, timezone-aware recurring events,
   and occurrence exceptions.
 - Booking event types, weekly availability and date overrides, duration,
@@ -47,3 +54,10 @@ Forked from local Calendi commit `cea9036567e6549dd91d3ea0fb3ad1a0076741e4`.
 Original development notes are retained in `CALENDI_HISTORY.md`. Cal.diy-derived
 code attribution remains in `THIRD_PARTY_LICENSES`. Package metadata retains the
 original MIT license declaration; inherited third-party terms still apply.
+
+## Interface previews
+
+- [Year overview](docs/year-preview.png)
+- [Agenda](docs/agenda-preview.png)
+
+Screenshots use a disposable database containing synthetic events.

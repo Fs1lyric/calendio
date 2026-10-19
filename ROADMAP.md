@@ -10,9 +10,12 @@ requirements and acceptance tests.
 
 - [x] Month / week / day views, event editor and drag-to-move
 - [x] Recurrence, exceptions, all-day events, local reminders
-- [ ] Agenda and year views, search, keyboard navigation of calendar cells
-- [ ] Multiple calendars, subscriptions, visibility and per-calendar colors
-- [ ] ICS import/export and CalDAV
+- [x] Agenda and year views; event title/notes search
+- [ ] Full keyboard navigation of month/week/day calendar cells
+- [x] Multiple local calendars, visibility and per-calendar colors
+- [ ] Remote calendar subscriptions
+- [x] Bounded ICS event import/export (supported cases in docs/ical.md)
+- [ ] Full iCalendar coverage and CalDAV
 - [ ] Attendees, invitations, RSVP, shared calendars and permissions
 - [ ] Focus time, working location, out-of-office, tasks and holidays
 - [ ] Multiple timezone display, offline sync and conflict reconciliation
@@ -34,7 +37,7 @@ requirements and acceptance tests.
 
 ## 3. Product quality and delivery
 
-- [ ] Deliberate desktop layout with primary calendar, navigation and agenda
+- [x] Desktop layout with primary calendar, navigation, search and agenda
 - [ ] Light/dark themes, keyboard-first workflows, accessible event navigation
 - [ ] Multi-user authentication, invitations, tenancy and role permissions
 - [ ] Stable HTTPS booking host, rate limits and abuse protection

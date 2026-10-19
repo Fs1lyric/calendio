@@ -429,9 +429,218 @@ fn snap_time(t: NaiveDateTime) -> NaiveDateTime {
     t.date().and_time(NaiveTime::MIN) + Duration::minutes(m.div_euclid(SNAP) * SNAP)
 }
 
+/// Chronological, keyboard-focusable agenda for the next thirty days.
+pub fn agenda(ui: &mut Ui, s: &Scene) -> Option<Action> {
+    let mut action = None;
+    if s.occ.is_empty() {
+        ui.add_space(40.0);
+        ui.heading("A little room in your calendar.");
+        ui.label("No events in this period. Create an event or import a calendar.");
+    }
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        let mut previous = String::new();
+        for (index, o) in s.occ.iter().enumerate() {
+            let start = s.local_start(o);
+            let day = start.format("%A, %-d %B").to_string();
+            if day != previous {
+                ui.add_space(18.0);
+                ui.label(egui::RichText::new(&day).strong().size(18.0));
+                ui.separator();
+                previous = day;
+            }
+            let time = if o.all_day {
+                "All day".into()
+            } else {
+                format!("{} – {}", start.format("%H:%M"), grid::local(&o.end, s.tz).format("%H:%M"))
+            };
+            if ui
+                .add_sized(
+                    [ui.available_width(), 54.0],
+                    egui::Button::new(format!("{time}    {}", o.title))
+                        .fill(theme::soft(theme::hex(o.color.as_deref()))),
+                )
+                .on_hover_text(&o.notes)
+                .clicked()
+            {
+                action = Some(Action::Open(index));
+            }
+        }
+    });
+    action
+}
+
+fn year_busy_days(scene: &Scene, anchor: NaiveDate) -> std::collections::HashSet<NaiveDate> {
+    let first = NaiveDate::from_ymd_opt(anchor.year(), 1, 1).expect("valid year");
+    let last = NaiveDate::from_ymd_opt(anchor.year(), 12, 31).expect("valid year");
+    let mut busy = std::collections::HashSet::new();
+    for occurrence in scene.occ {
+        let start = scene.local_start(occurrence).date().max(first);
+        let end = if occurrence.all_day {
+            occurrence.end.parse::<NaiveDate>().ok().and_then(|d| d.pred_opt())
+        } else {
+            grid::local(&occurrence.end, scene.tz).checked_sub_signed(Duration::nanoseconds(1)).map(|t| t.date())
+        };
+        if let Some(end) = end {
+            for day in start.iter_days().take_while(|day| *day <= end.min(last)) {
+                busy.insert(day);
+            }
+        }
+    }
+    busy
+}
+
+/// Year overview. Each day is a real focusable button; a dot marks busy days.
+pub fn year(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
+    let columns = (((ui.available_width() - 14.0) / 240.0) as usize).clamp(1, 4);
+    let card_width = ((ui.available_width() - 14.0 - 18.0 * (columns - 1) as f32) / columns as f32 - 24.0).max(198.0);
+    let cell_width = (card_width - 12.0) / 7.0;
+    let mut action = None;
+    let busy = year_busy_days(s, anchor);
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        egui::Grid::new("year-grid").num_columns(columns).spacing([18.0, 20.0]).show(ui, |ui| {
+            for month in 1..=12 {
+                let first = NaiveDate::from_ymd_opt(anchor.year(), month, 1).expect("valid month");
+                egui::Frame::new().fill(theme::SURFACE).inner_margin(12.0).corner_radius(8).show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(card_width);
+                        ui.spacing_mut().button_padding = egui::vec2(2.0, 2.0);
+                        ui.spacing_mut().interact_size = egui::vec2(24.0, 24.0);
+                        ui.label(egui::RichText::new(first.format("%B").to_string()).strong().size(17.0));
+                        egui::Grid::new(("mini-month", month)).num_columns(7).spacing([2.0, 2.0]).show(ui, |ui| {
+                            for name in ["M", "T", "W", "T", "F", "S", "S"] {
+                                ui.label(egui::RichText::new(name).small().color(theme::INK_3));
+                            }
+                            ui.end_row();
+                            let start = grid::week_start(first);
+                            for i in 0..42 {
+                                let day = start + Duration::days(i);
+                                if day.month() == month {
+                                    let has_events = busy.contains(&day);
+                                    let text =
+                                        if has_events { format!("{}·", day.day()) } else { day.day().to_string() };
+                                    let button =
+                                        egui::Button::new(egui::RichText::new(text).size(if cell_width > 36.0 {
+                                            14.0
+                                        } else {
+                                            12.0
+                                        }))
+                                        .selected(day == s.now.date());
+                                    if ui
+                                        .add_sized([cell_width, 25.0], button)
+                                        .on_hover_text(format!(
+                                            "{}{}",
+                                            day,
+                                            if has_events { " · Has events" } else { "" }
+                                        ))
+                                        .clicked()
+                                    {
+                                        action = Some(Action::Goto(day));
+                                    }
+                                } else {
+                                    ui.allocate_space(egui::vec2(cell_width, 25.0));
+                                }
+                                if i % 7 == 6 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+                    });
+                });
+                if (month as usize).is_multiple_of(columns) {
+                    ui.end_row();
+                }
+            }
+        });
+    });
+    action
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn year_marks_every_busy_day_and_respects_exclusive_midnight_ends() {
+        let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+        let make = |start: &str, end: &str, all_day| Occurrence {
+            event_id: 1,
+            title: "Away".into(),
+            notes: String::new(),
+            start: start.into(),
+            end: end.into(),
+            all_day,
+            color: None,
+            reminder_minutes: None,
+            booking_id: None,
+            original_start: None,
+        };
+        let occurrences =
+            [make("2026-10-19T23:00:00Z", "2026-10-21T00:00:00Z", false), make("2026-10-23", "2026-10-25", true)];
+        let scene = Scene { occ: &occurrences, tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap() };
+        let busy = year_busy_days(&scene, day);
+        for n in [19, 20, 23, 24] {
+            assert!(busy.contains(&NaiveDate::from_ymd_opt(2026, 10, n).unwrap()));
+        }
+        for n in [21, 22, 25] {
+            assert!(!busy.contains(&NaiveDate::from_ymd_opt(2026, 10, n).unwrap()));
+        }
+    }
+
+    #[test]
+    fn year_cards_fit_inside_the_calendar_width() {
+        for width in [360.0, 800.0, 1180.0] {
+            let context = egui::Context::default();
+            theme::apply(&context);
+            let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+            let scene = Scene { occ: &[], tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap() };
+            let mut used = 0.0;
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(width, 780.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    year(ui, &scene, day);
+                    used = ui.min_rect().width();
+                },
+            );
+            output.textures_delta.clear();
+            assert!(used <= width, "Year view uses {used} pixels inside a {width}-pixel window");
+        }
+    }
+
+    #[test]
+    fn every_calendar_view_renders_at_desktop_and_narrow_sizes() {
+        for width in [360.0, 800.0, 1180.0] {
+            for view in [grid::View::Year, grid::View::Agenda, grid::View::Month, grid::View::Week, grid::View::Day] {
+                let context = egui::Context::default();
+                let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+                let scene = Scene { occ: &[], tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap() };
+                let mut output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(width, 780.0))),
+                        ..Default::default()
+                    },
+                    |ui| match view {
+                        grid::View::Year => {
+                            year(ui, &scene, day);
+                        }
+                        grid::View::Agenda => {
+                            agenda(ui, &scene);
+                        }
+                        grid::View::Month => {
+                            month(ui, &scene, day);
+                        }
+                        v => {
+                            time_grid(ui, &grid::days(v, day), &scene, None);
+                        }
+                    },
+                );
+                assert!(!output.shapes.is_empty(), "View must paint content");
+                output.textures_delta.clear();
+            }
+        }
+    }
 
     #[test]
     fn an_hour_block_shows_its_notes() {

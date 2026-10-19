@@ -11,6 +11,8 @@ pub enum View {
     Month,
     Week,
     Day,
+    Agenda,
+    Year,
 }
 
 /// Weeks start on Monday.
@@ -24,6 +26,12 @@ pub fn days(view: View, anchor: NaiveDate) -> Vec<NaiveDate> {
         View::Month => (week_start(anchor.with_day(1).expect("day 1 exists")), 42),
         View::Week => (week_start(anchor), 7),
         View::Day => (anchor, 1),
+        View::Agenda => (anchor, 30),
+        View::Year => {
+            let first = NaiveDate::from_ymd_opt(anchor.year(), 1, 1).expect("valid year");
+            let next = NaiveDate::from_ymd_opt(anchor.year() + 1, 1, 1).expect("valid next year");
+            (first, (next - first).num_days() as usize)
+        }
     };
     first.iter_days().take(count).collect()
 }
@@ -32,8 +40,9 @@ pub fn days(view: View, anchor: NaiveDate) -> Vec<NaiveDate> {
 /// the month where it can (31 Jan → 28 Feb).
 pub fn step(view: View, anchor: NaiveDate, by: i32) -> NaiveDate {
     match view {
-        View::Month => {
-            let months = chrono::Months::new(by.unsigned_abs());
+        View::Month | View::Year => {
+            let count = if view == View::Year { 12 } else { 1 };
+            let months = chrono::Months::new(by.unsigned_abs() * count);
             if by >= 0 {
                 anchor + months
             } else {
@@ -42,12 +51,15 @@ pub fn step(view: View, anchor: NaiveDate, by: i32) -> NaiveDate {
         }
         View::Week => anchor + Duration::weeks(by as i64),
         View::Day => anchor + Duration::days(by as i64),
+        View::Agenda => anchor + Duration::days(30 * by as i64),
     }
 }
 
 pub fn title(view: View, anchor: NaiveDate) -> String {
     match view {
         View::Month => anchor.format("%B %Y").to_string(),
+        View::Year => anchor.format("%Y").to_string(),
+        View::Agenda => format!("Agenda · {}", anchor.format("%-d %b %Y")),
         View::Day => anchor.format("%A %-d %B %Y").to_string(),
         View::Week => {
             let (a, b) = (week_start(anchor), week_start(anchor) + Duration::days(6));
@@ -272,5 +284,33 @@ mod tests {
         assert_eq!(minute_at(48.0 * 9.4, 48.0, 15), 555);
         assert_eq!(minute_at(-10.0, 48.0, 15), 0);
         assert_eq!(minute_at(48.0 * 30.0, 48.0, 15), 24 * 60 - 15);
+    }
+}
+
+#[cfg(test)]
+mod agenda_tests {
+    use super::*;
+    #[test]
+    fn agenda_has_a_month_of_days_and_navigation_keeps_its_window() {
+        let anchor = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+        let visible = days(View::Agenda, anchor);
+        assert_eq!(visible.len(), 30);
+        assert_eq!(visible[0], anchor);
+        assert_eq!(step(View::Agenda, anchor, 1), anchor + Duration::days(30));
+        assert!(title(View::Agenda, anchor).contains("Agenda"));
+    }
+}
+
+#[cfg(test)]
+mod year_tests {
+    use super::*;
+    #[test]
+    fn year_view_includes_leap_day_and_moves_by_calendar_years() {
+        let leap = NaiveDate::from_ymd_opt(2024, 2, 29).unwrap();
+        let days = days(View::Year, leap);
+        assert_eq!(days.len(), 366);
+        assert_eq!(days[0], NaiveDate::from_ymd_opt(2024, 1, 1).unwrap());
+        assert_eq!(step(View::Year, leap, 1), NaiveDate::from_ymd_opt(2025, 2, 28).unwrap());
+        assert_eq!(title(View::Year, leap), "2024");
     }
 }

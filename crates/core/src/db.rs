@@ -40,7 +40,8 @@ fn invalid<T>(msg: impl Into<String>) -> Result<T> {
 }
 
 /// Each entry moves the schema one version forward. Never edit a shipped one.
-const MIGRATIONS: &[&str] = &[r#"
+const MIGRATIONS: &[&str] = &[
+    r#"
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 CREATE TABLE event_types (
@@ -113,7 +114,45 @@ CREATE TABLE date_overrides (
     start_minute INTEGER NOT NULL,
     end_minute INTEGER NOT NULL
 );
-"#];
+"#,
+    r#"
+CREATE TABLE calendars (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    visible INTEGER NOT NULL DEFAULT 1
+);
+INSERT INTO calendars (id, name, color) VALUES (1, 'Personal', '#2457b2');
+ALTER TABLE events ADD COLUMN calendar_id INTEGER NOT NULL DEFAULT 1;
+-- SQLite cannot add a REFERENCES column with a non-null default to a
+-- populated table. Equivalent guards preserve integrity during migration.
+CREATE TRIGGER calendar_check_insert BEFORE INSERT ON events
+WHEN NOT EXISTS (SELECT 1 FROM calendars WHERE id=NEW.calendar_id) BEGIN
+    SELECT RAISE(ABORT, 'calendar does not exist');
+END;
+CREATE TRIGGER calendar_check_update BEFORE UPDATE OF calendar_id ON events
+WHEN NOT EXISTS (SELECT 1 FROM calendars WHERE id=NEW.calendar_id) BEGIN
+    SELECT RAISE(ABORT, 'calendar does not exist');
+END;
+CREATE TRIGGER calendar_check_delete BEFORE DELETE ON calendars
+WHEN EXISTS (SELECT 1 FROM events WHERE calendar_id=OLD.id) BEGIN
+    SELECT RAISE(ABORT, 'move calendar events before deleting');
+END;
+CREATE INDEX events_calendar ON events(calendar_id);
+CREATE TABLE event_uids (
+    calendar_id INTEGER NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
+    uid TEXT NOT NULL,
+    event_id INTEGER NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
+    PRIMARY KEY (calendar_id, uid)
+);
+INSERT INTO event_uids (calendar_id,uid,event_id)
+    SELECT calendar_id,lower(hex(randomblob(16))) || '@calendio.local',id FROM events;
+CREATE TRIGGER event_uid_on_create AFTER INSERT ON events BEGIN
+    INSERT INTO event_uids (calendar_id,uid,event_id)
+        VALUES (NEW.calendar_id,lower(hex(randomblob(16))) || '@calendio.local',NEW.id);
+END;
+"#,
+];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventInput {
@@ -462,12 +501,16 @@ impl Db {
     // ---------- events ----------
 
     pub fn create_event(&self, input: &EventInput) -> Result<i64> {
+        self.create_event_in_calendar(input, 1)
+    }
+
+    pub fn create_event_in_calendar(&self, input: &EventInput, calendar_id: i64) -> Result<i64> {
         let e = clean_event(input)?;
         let now = now_stamp();
         self.conn.execute(
-            "INSERT INTO events (title, notes, start, end, all_day, tz, rrule, color, reminder_minutes, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
-            params![e.title, e.notes, e.start, e.end, e.all_day, e.tz, e.rrule, e.color, e.reminder_minutes, now],
+            "INSERT INTO events (title, notes, start, end, all_day, tz, rrule, color, reminder_minutes, created_at, updated_at, calendar_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?11)",
+            params![e.title, e.notes, e.start, e.end, e.all_day, e.tz, e.rrule, e.color, e.reminder_minutes, now, calendar_id],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -475,12 +518,16 @@ impl Db {
     /// Moving a series or changing its rule drops its exceptions, since they
     /// name occurrences the new schedule may not have.
     pub fn update_event(&self, id: i64, input: &EventInput) -> Result<()> {
+        self.update_event_in_calendar(id, input, None)
+    }
+
+    pub fn update_event_in_calendar(&self, id: i64, input: &EventInput, calendar_id: Option<i64>) -> Result<()> {
         let e = clean_event(input)?;
         let Some(old) = self.event(id)? else { return invalid(format!("no event {id}")) };
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
             "UPDATE events SET title = ?2, notes = ?3, start = ?4, end = ?5, all_day = ?6, tz = ?7, rrule = ?8,
-                    color = ?9, reminder_minutes = ?10, updated_at = ?11
+                    color = ?9, reminder_minutes = ?10, updated_at = ?11, calendar_id = COALESCE(?12, calendar_id)
              WHERE id = ?1",
             params![
                 id,
@@ -493,9 +540,13 @@ impl Db {
                 e.rrule,
                 e.color,
                 e.reminder_minutes,
-                now_stamp()
+                now_stamp(),
+                calendar_id
             ],
         )?;
+        if let Some(calendar_id) = calendar_id {
+            tx.execute("UPDATE event_uids SET calendar_id=?2 WHERE event_id=?1", params![id, calendar_id])?;
+        }
         let rescheduled = (&old.start, old.all_day, &old.tz, &old.rrule) != (&e.start, e.all_day, &e.tz, &e.rrule);
         if rescheduled {
             tx.execute("DELETE FROM event_exceptions WHERE event_id = ?1", [id])?;
@@ -514,6 +565,13 @@ impl Db {
             .conn
             .query_row(&format!("SELECT {EVENT_COLS} FROM events WHERE id = ?1"), [id], event_row)
             .optional()?)
+    }
+
+    /// Stored events including series masters, in start/id order.
+    pub fn all_events(&self) -> Result<Vec<Event>> {
+        let mut stmt = self.conn.prepare(&format!("SELECT {EVENT_COLS} FROM events ORDER BY start, id"))?;
+        let rows = stmt.query_map([], event_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Events that overlap `[from, to)`, plus every series that has started by

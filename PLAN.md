@@ -1,14 +1,18 @@
-# Initial repository plan
+# Calendar feature implementation
 
-Files: workspace and crate manifests, app identity, storage defaults, packaging,
-UI theme, README, product roadmap and isolation tests.
+1. `core/db.rs`, new `core/calendars.rs`, integration tests: migrate existing
+   events into a Personal calendar; calendar CRUD/visibility, event assignment,
+   Unicode event search and visible occurrence filtering. Hidden events must
+   continue to block booking availability.
+2. `app/grid.rs`, `main.rs`, new workspace UI module: agenda view, search,
+   calendar controls and assignment in the editor.
+3. New `core/ical.rs` and tests: ICS import/export with text escaping/folding,
+   all-day/UTC/IANA timezone dates, recurrence and exceptions, stable UIDs,
+   atomic validation and duplicate protection. Reject unsupported recurrence
+   constructs rather than silently changing their meaning.
+4. Wire import/export into the desktop UI; keep credentials-dependent Google
+   sync, invitations and shared-account features explicitly incomplete.
 
-Keep the existing tested Rust/SQLite calendar and booking implementation.
-Give Calendio independent storage and executable/service names. Do not migrate
-Calendi data or install/start services during repository setup. Use an off-white
-calendar canvas, ink text, blue action accent, readable event blocks and larger
-controls. Keep the full feature-parity backlog explicit in ROADMAP.md.
-
-Verification: fail identity tests first, then pass; fail the new theme contrast
-test before theme changes; run workspace tests, clippy and rustfmt; launch with
-a disposable database and capture the actual app.
+Verification: write failing tests first, then implement. Run workspace tests,
+Clippy, formatting and identity checks; launch against a disposable database
+and screenshot the actual UI. Record precise supported interchange behavior.

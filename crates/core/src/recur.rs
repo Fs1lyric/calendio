@@ -76,7 +76,7 @@ fn rule_start(e: &EventInput) -> Result<DateTime<rrule::Tz>> {
 
 /// A date-only `UNTIL` (what RFC 5545 asks of an all-day series) means through
 /// the end of that day. The rule engine wants it in UTC, so rewrite it.
-fn until_in_utc(e: &EventInput, rule: &str) -> Result<String> {
+pub(crate) fn until_in_utc(e: &EventInput, rule: &str) -> Result<String> {
     let parts = rule.split(';').map(|part| match part.strip_prefix("UNTIL=") {
         Some(v) if v.len() == 8 => {
             let date = NaiveDate::parse_from_str(v, "%Y%m%d").map_err(|err| bad_rule(rule, err))?;
