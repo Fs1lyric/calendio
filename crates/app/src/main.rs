@@ -4,6 +4,8 @@ mod booking;
 mod editor;
 mod form;
 mod grid;
+mod navigation;
+mod quick_add;
 mod setup;
 mod theme;
 mod views;
@@ -22,6 +24,9 @@ use views::{Action, Scene};
 struct App {
     db: Db,
     workspace: workspace::Workspace,
+    quick_add: quick_add::QuickAdd,
+    navigation: navigation::Navigation,
+    today: Vec<navigation::TodayItem>,
     tz: Tz,
     view: View,
     anchor: NaiveDate,
@@ -41,6 +46,9 @@ impl App {
         App {
             db,
             workspace,
+            quick_add: quick_add::QuickAdd::default(),
+            navigation: navigation::Navigation::new(Utc::now().with_timezone(&tz).date_naive()),
+            today: Vec::new(),
             tz,
             view: View::Week,
             anchor: Utc::now().with_timezone(&tz).date_naive(),
@@ -71,6 +79,20 @@ impl App {
             Ok(occ) => self.occ = occ,
             Err(e) => self.error = Some(e.to_string()),
         }
+        let (from, to) = grid::window(&[self.now().date()], self.tz);
+        match self.db.visible_occurrences(&from.to_rfc3339(), &to.to_rfc3339()).and_then(|items| {
+            items
+                .into_iter()
+                .map(|occurrence| {
+                    self.db
+                        .event_details(occurrence.event_id)
+                        .map(|details| navigation::TodayItem { occurrence, details })
+                })
+                .collect()
+        }) {
+            Ok(items) => self.today = items,
+            Err(error) => self.error = Some(error.to_string()),
+        }
         self.stale = false;
         self.loaded_at = std::time::Instant::now();
     }
@@ -78,6 +100,7 @@ impl App {
     fn go(&mut self, view: View, anchor: NaiveDate) {
         self.booking = None;
         self.workspace.search_open = false;
+        self.navigation.sync(anchor);
         if view != self.view && view != View::Month {
             self.scroll_to = Some(8.0 * views::HOUR_PX);
         }
@@ -85,7 +108,11 @@ impl App {
     }
 
     fn open(&mut self, index: usize) {
-        let o = &self.occ[index];
+        let occurrence = self.occ[index].clone();
+        self.open_occurrence(&occurrence);
+    }
+
+    fn open_occurrence(&mut self, o: &Occurrence) {
         match self.db.event(o.event_id) {
             Ok(Some(e)) => self.editor = Some(self.make_editor(Form::open(o, &e, self.tz), Some(e))),
             Ok(None) => self.stale = true,
@@ -96,7 +123,15 @@ impl App {
     fn make_editor(&self, form: Form, series: Option<calendio_core::db::Event>) -> Editor {
         let calendar_id =
             series.as_ref().and_then(|e| self.db.event_calendar(e.id).ok()).unwrap_or(self.workspace.selected);
+        let details = series.as_ref().map(|e| self.db.event_details(e.id));
         let mut editor = Editor::new(form, series);
+        if let Some(details) = details {
+            match details {
+                Ok(details) => editor.details = details,
+                Err(error) => editor.error = Some(error.to_string()),
+            }
+        }
+
         editor.calendar_id = calendar_id;
         editor.calendars = self.workspace.calendars.clone();
         editor
@@ -115,6 +150,26 @@ impl App {
                     }
                 }
                 self.db.set_exception(x)
+            }
+        }
+    }
+
+    fn save_editor(
+        &self,
+        save: &Save,
+        calendar_id: i64,
+        details: &calendio_core::details::EventDetails,
+    ) -> calendio_core::db::Result<()> {
+        match save {
+            Save::Create(event) => self.db.create_event_with_details(event, calendar_id, details).map(drop),
+            Save::Update(id, event) => self.db.update_event_with_details(*id, event, Some(calendar_id), Some(details)),
+            Save::Exception(exception) => {
+                if details.clean()? != self.db.event_details(exception.event_id)? {
+                    return Err(calendio_core::db::Error::Invalid(
+                        "To change location, meeting link, or availability, choose the entire series".into(),
+                    ));
+                }
+                self.apply(save, Some(calendar_id))
             }
         }
     }
@@ -217,6 +272,7 @@ impl App {
     }
 
     fn open_booking(&mut self) {
+        self.workspace.search_open = false;
         self.booking.get_or_insert_with(booking::Screen::new).reload();
     }
 
@@ -232,6 +288,17 @@ impl App {
     }
 
     fn keys(&mut self, ctx: &egui::Context) {
+        if self.editor.is_none()
+            && !self.quick_add.is_open()
+            && ctx.input(|i| i.modifiers.command && i.key_pressed(Key::K))
+        {
+            self.workspace.open_search();
+            self.booking = None;
+            return;
+        }
+        if self.quick_add.is_open() {
+            return;
+        }
         if self.editor.is_some() || ctx.memory(|m| m.focused().is_some()) {
             return;
         }
@@ -251,6 +318,9 @@ impl App {
         if pressed(Key::N) {
             self.new_event();
         }
+        if pressed(Key::Q) {
+            self.quick_add.open();
+        }
         if pressed(Key::B) {
             self.open_booking();
         }
@@ -263,8 +333,8 @@ impl App {
     }
 }
 
-impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+impl App {
+    fn show(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.keys(&ctx);
         self.reload();
@@ -282,52 +352,71 @@ impl eframe::App for App {
                 });
             }
             ui.add_space(6.0);
-            self.workspace.toolbar(ui);
+            if self.workspace.toolbar(ui) {
+                self.quick_add.open();
+            }
             ui.add_space(6.0);
         });
+        if self.workspace.search_open {
+            self.booking = None;
+        }
+        let show_today = ui.available_width() >= 1440.0;
         if ui.available_width() >= 940.0 {
-            egui::Panel::left("navigation").resizable(false).default_size(208.0).show(ui, |ui| {
-                ui.add_space(20.0);
-                ui.label(RichText::new("YOUR WORKSPACE").size(11.0).color(theme::INK_3));
-                ui.add_space(12.0);
-                ui.heading("Make room.");
-                ui.label(RichText::new("For what matters.").color(theme::INK_2));
-                ui.add_space(24.0);
-                if ui.add_sized([180.0, 38.0], egui::Button::new("Create event")).clicked() {
-                    self.new_event();
-                }
-                ui.add_space(20.0);
-                ui.label(RichText::new("CALENDAR").size(11.0).color(theme::INK_3));
-                for (view, name) in [
-                    (View::Year, "Year"),
-                    (View::Agenda, "Agenda"),
-                    (View::Day, "Day"),
-                    (View::Week, "Week"),
-                    (View::Month, "Month"),
-                ] {
-                    if ui.selectable_label(self.booking.is_none() && self.view == view, name).clicked() {
-                        self.go(view, self.anchor);
+            egui::Panel::left("navigation").resizable(false).default_size(232.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt("sidebar-scroll").show(ui, |ui| {
+                    ui.add_space(20.0);
+                    let today = self.now().date();
+                    if let Some(day) = self.navigation.show(ui, self.anchor, today) {
+                        self.go(if self.view == View::Year { View::Day } else { self.view }, day);
                     }
-                }
-                ui.add_space(20.0);
-                ui.label(RichText::new("SCHEDULING").size(11.0).color(theme::INK_3));
-                if ui.selectable_label(self.booking.is_some(), "Booking links & hours").clicked() {
-                    self.open_booking();
-                }
-                ui.add_space(24.0);
-                ui.separator();
-                ui.add_space(8.0);
-                ui.label(RichText::new("MY CALENDARS").size(11.0).color(theme::INK_3));
-                match self.workspace.sidebar(ui, &self.db) {
-                    Ok(changed) => self.stale |= changed,
-                    Err(e) => self.error = Some(e),
-                }
-                ui.add_space(20.0);
-                ui.label(RichText::new("TIMEZONE").size(11.0).color(theme::INK_3));
-                ui.label(self.tz.to_string());
-                ui.add_space(16.0);
-                ui.label(RichText::new("Stored on this device").small().color(theme::INK_3));
+                    ui.add_space(20.0);
+                    if ui.add_sized([180.0, 38.0], egui::Button::new("Create event")).clicked() {
+                        self.new_event();
+                    }
+                    ui.add_space(20.0);
+                    ui.label(RichText::new("CALENDAR").size(11.0).color(theme::INK_3));
+                    for (view, name) in [
+                        (View::Year, "Year"),
+                        (View::Agenda, "Agenda"),
+                        (View::Day, "Day"),
+                        (View::Week, "Week"),
+                        (View::Month, "Month"),
+                    ] {
+                        if ui.selectable_label(self.booking.is_none() && self.view == view, name).clicked() {
+                            self.go(view, self.anchor);
+                        }
+                    }
+                    ui.add_space(20.0);
+                    ui.label(RichText::new("SCHEDULING").size(11.0).color(theme::INK_3));
+                    if ui.selectable_label(self.booking.is_some(), "Booking links & hours").clicked() {
+                        self.open_booking();
+                    }
+                    ui.add_space(24.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("MY CALENDARS").size(11.0).color(theme::INK_3));
+                    match self.workspace.sidebar(ui, &self.db) {
+                        Ok(changed) => self.stale |= changed,
+                        Err(e) => self.error = Some(e),
+                    }
+                    ui.add_space(20.0);
+                    ui.label(RichText::new("TIMEZONE").size(11.0).color(theme::INK_3));
+                    ui.label(self.tz.to_string());
+                    ui.add_space(16.0);
+                    ui.label(RichText::new("Stored on this device").small().color(theme::INK_3));
+                });
             });
+        }
+        if show_today && self.booking.is_none() && !self.workspace.search_open {
+            let now = self.now();
+            let selected = egui::Panel::right("today")
+                .resizable(false)
+                .default_size(260.0)
+                .show(ui, |ui| navigation::today_agenda(ui, &self.today, now, self.tz))
+                .inner;
+            if let Some(occurrence) = selected {
+                self.open_occurrence(&occurrence);
+            }
         }
         if let Some(screen) = self.booking.as_mut() {
             let result = egui::CentralPanel::default().show(ui, |ui| screen.show(ui, &self.db, self.tz)).inner;
@@ -347,7 +436,16 @@ impl eframe::App for App {
         if self.workspace.dialogs(&ctx, &self.db, self.tz) {
             self.stale = true;
         }
+        if let Some(form) = self.quick_add.show(&ctx, self.now(), self.tz) {
+            self.editor = Some(self.make_editor(form, None));
+        }
         self.editor_frame(&ctx);
+    }
+}
+
+impl eframe::App for App {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.show(ui);
     }
 }
 
@@ -381,10 +479,11 @@ impl App {
         ed.calendars = self.workspace.calendars.clone();
         let outcome = ed.show(ctx);
         let calendar_id = ed.calendar_id;
+        let details = ed.details.clone();
         let result = match &outcome {
             None => return,
             Some(Outcome::Close) => Ok(()),
-            Some(Outcome::Save(s)) => self.apply(s, Some(calendar_id)),
+            Some(Outcome::Save(s)) => self.save_editor(s, calendar_id, &details),
             Some(Outcome::DeleteEvent(id)) => self.db.delete_event(*id),
             Some(Outcome::DeleteOne(x)) => self.db.set_exception(x),
         };
@@ -402,7 +501,7 @@ impl App {
     }
 }
 
-const USAGE: &str = "usage: calendio [--view month|week|day|agenda|year] [--booking] [--new]";
+const USAGE: &str = "usage: calendio [--view month|week|day|agenda|year] [--booking] [--new] [--quick-add]";
 
 /// Vsync stays off: on Wayland a vsynced swap waits for a frame callback, and Hyprland
 /// sends none to a window on a hidden workspace, so the 30s repaint would block the
@@ -422,6 +521,7 @@ fn native_options() -> eframe::NativeOptions {
 fn main() -> eframe::Result {
     let mut view = View::Week;
     let mut quick_add = false;
+    let mut quick_entry = false;
     let mut booking = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -440,6 +540,7 @@ fn main() -> eframe::Result {
                 }
             }
             "--new" => quick_add = true,
+            "--quick-add" => quick_entry = true,
             "--booking" => booking = true,
             _ => {
                 eprintln!("{USAGE}");
@@ -467,6 +568,9 @@ fn main() -> eframe::Result {
             }
             if quick_add {
                 app.new_event();
+            }
+            if quick_entry {
+                app.quick_add.open();
             }
             Ok(Box::new(app))
         }),
@@ -513,5 +617,98 @@ mod calendar_edit_tests {
         assert!(app.apply(&Save::Exception(exception), Some(work)).is_err());
         assert!(app.db.exceptions_for(&[id]).unwrap().is_empty());
         assert_eq!(app.db.event_calendar(id).unwrap(), 1);
+    }
+}
+
+#[cfg(test)]
+mod improvement_tests {
+    use super::*;
+    use calendio_core::details::EventDetails;
+
+    #[test]
+    fn editor_saves_details_and_availability_with_the_event() {
+        let app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
+        let form = quick_add::parse("Planning tomorrow at 2pm", app.now(), chrono_tz::UTC).unwrap();
+        let save = form.save(Scope::All, None).unwrap();
+        let details = EventDetails {
+            location: "North studio".into(),
+            meeting_url: "https://meet.example.com/planning".into(),
+            busy: false,
+        };
+        app.save_editor(&save, 1, &details).unwrap();
+        let event = app.db.all_events().unwrap().pop().unwrap();
+        assert_eq!(app.db.event_details(event.id).unwrap(), details);
+        assert_eq!(app.db.search_events("north studio").unwrap()[0].id, event.id);
+    }
+    #[test]
+    fn today_agenda_is_independent_of_the_browsed_month() {
+        let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
+        let now = app.now();
+        let start = now.date().and_hms_opt(9, 0, 0).unwrap();
+        let mut form = Form::new(start, start + Duration::hours(1), false, chrono_tz::UTC);
+        form.title = "Today planning".into();
+        app.apply(&form.save(Scope::All, None).unwrap(), Some(1)).unwrap();
+        app.go(View::Month, now.date() + Duration::days(90));
+        app.reload();
+        assert!(app.occ.is_empty());
+        assert_eq!(app.today.len(), 1);
+        assert_eq!(app.today[0].occurrence.title, "Today planning");
+    }
+    #[test]
+    fn changing_series_details_for_only_one_occurrence_is_rejected() {
+        let app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
+        let mut form = quick_add::parse("Planning today at 9am", app.now(), chrono_tz::UTC).unwrap();
+        form.repeat = form::Repeat::Daily;
+        app.apply(&form.save(Scope::All, None).unwrap(), Some(1)).unwrap();
+        let event = app.db.all_events().unwrap().pop().unwrap();
+        let exception = calendio_core::db::Exception {
+            event_id: event.id,
+            original_start: event.start.clone(),
+            cancelled: false,
+            title: None,
+            notes: None,
+            start: None,
+            end: None,
+        };
+        assert!(app
+            .save_editor(
+                &Save::Exception(exception),
+                1,
+                &EventDetails { location: "Changed".into(), ..Default::default() }
+            )
+            .is_err());
+        assert!(app.db.exceptions_for(&[event.id]).unwrap().is_empty());
+    }
+    #[test]
+    fn complete_app_renders_calendar_editor_and_quick_add_at_supported_sizes() {
+        for (width, height) in [(360.0, 320.0), (800.0, 780.0), (1904.0, 949.0)] {
+            for state in 0..3 {
+                let ctx = egui::Context::default();
+                theme::apply(&ctx);
+                let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
+                if state == 1 {
+                    app.new_event();
+                }
+                if state == 2 {
+                    app.quick_add.open();
+                }
+                for _ in 0..2 {
+                    let mut used = 0.0;
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height))),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            app.show(ui);
+                            used = ui.min_rect().width();
+                        },
+                    );
+                    assert!(!output.shapes.is_empty());
+                    output.textures_delta.clear();
+                    assert!(used <= width, "App uses {used} pixels in a {width}-pixel window");
+                }
+            }
+        }
     }
 }

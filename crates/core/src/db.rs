@@ -152,6 +152,14 @@ CREATE TRIGGER event_uid_on_create AFTER INSERT ON events BEGIN
         VALUES (NEW.calendar_id,lower(hex(randomblob(16))) || '@calendio.local',NEW.id);
 END;
 "#,
+    r#"
+CREATE TABLE event_details (
+    event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+    location TEXT NOT NULL DEFAULT '',
+    meeting_url TEXT NOT NULL DEFAULT '',
+    busy INTEGER NOT NULL CHECK (busy IN (0,1))
+);
+"#,
 ];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -522,6 +530,17 @@ impl Db {
     }
 
     pub fn update_event_in_calendar(&self, id: i64, input: &EventInput, calendar_id: Option<i64>) -> Result<()> {
+        self.update_event_with_details(id, input, calendar_id, None)
+    }
+
+    pub fn update_event_with_details(
+        &self,
+        id: i64,
+        input: &EventInput,
+        calendar_id: Option<i64>,
+        details: Option<&crate::details::EventDetails>,
+    ) -> Result<()> {
+        let details = details.map(crate::details::EventDetails::clean).transpose()?;
         let e = clean_event(input)?;
         let Some(old) = self.event(id)? else { return invalid(format!("no event {id}")) };
         let tx = self.conn.unchecked_transaction()?;
@@ -546,6 +565,9 @@ impl Db {
         )?;
         if let Some(calendar_id) = calendar_id {
             tx.execute("UPDATE event_uids SET calendar_id=?2 WHERE event_id=?1", params![id, calendar_id])?;
+        }
+        if let Some(details) = details {
+            self.set_event_details(id, &details)?;
         }
         let rescheduled = (&old.start, old.all_day, &old.tz, &old.rrule) != (&e.start, e.all_day, &e.tz, &e.rrule);
         if rescheduled {
@@ -857,19 +879,26 @@ impl Db {
         Ok(())
     }
 
-    /// Timed calendar time between `from` and `to` that guests can't book.
-    /// All-day events count as free, as in Google Calendar. A booking also
-    /// keeps its own type's gaps before and after it, as in Cal.com.
+    /// Busy calendar time, respecting event availability. All-day events are
+    /// free unless explicitly marked busy. Bookings always block time and
+    /// retain their event type's buffers.
     pub fn busy_between(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<DateRange>> {
         let occ = self.occurrences_between(&stamp(from), &stamp(to))?;
         let mut gaps = self.conn.prepare(
             "SELECT t.buffer_before_min, t.buffer_after_min
              FROM bookings b JOIN event_types t ON t.id = b.event_type_id WHERE b.id = ?1",
         )?;
-        let instant = |s: &str| DateTime::parse_from_rfc3339(s).map(|t| t.with_timezone(&Utc)).ok();
+        let availability = self.availability_map()?;
         let mut out = Vec::new();
-        for o in occ.iter().filter(|o| !o.all_day) {
-            let (Some(start), Some(end)) = (instant(&o.start), instant(&o.end)) else { continue };
+        for o in &occ {
+            let Some((busy, zone)) = availability.get(&o.event_id) else {
+                return invalid("Busy event has no availability record");
+            };
+            if !busy && o.booking_id.is_none() {
+                continue;
+            }
+            let start = recur::instant(&o.start, o.all_day, *zone)?;
+            let end = recur::instant(&o.end, o.all_day, *zone)?;
             let (before, after): (i64, i64) = match o.booking_id {
                 Some(id) => gaps.query_row([id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?.unwrap_or((0, 0)),
                 None => (0, 0),

@@ -9,6 +9,8 @@ requirements and acceptance tests.
 ## 1. Personal calendar
 
 - [x] Month / week / day views, event editor and drag-to-move
+- [x] Quick event entry, mini-calendar navigation and today agenda
+- [x] Locations, meeting links and explicit Free/Busy availability
 - [x] Recurrence, exceptions, all-day events, local reminders
 - [x] Agenda and year views; event title/notes search
 - [ ] Full keyboard navigation of month/week/day calendar cells

@@ -17,9 +17,10 @@ entire import. Files are limited to 8 MiB and 10,000 event components. UIDs are
 scoped to a destination calendar. Reimporting an existing UID skips it instead
 of overwriting local changes. Imports are not bidirectional synchronization.
 
-The import report warns when metadata is not imported, including external
-locations, attendee/organizer data, unsupported or additional alarms, and
-custom VTIMEZONE rules. Named timezones use installed IANA rules. RDATE,
+Locations, HTTP/HTTPS meeting links, and Free/Busy transparency are preserved.
+Per-occurrence changes to these fields are rejected; edit the series instead.
+The import report warns when attendee/organizer data, unsupported or additional
+alarms, or custom VTIMEZONE rules cannot be imported. Named timezones use installed IANA rules. RDATE,
 EXRULE, THISANDFUTURE changes, invitation METHODs, and unsupported components
 are rejected. Timed events require positive duration. This is bounded event
 interchange, not complete iCalendar or invitation support.

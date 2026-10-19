@@ -22,6 +22,7 @@ enum Asking {
 
 pub struct Editor {
     pub form: Form,
+    pub details: calendio_core::details::EventDetails,
     pub calendar_id: i64,
     pub calendars: Vec<calendio_core::calendars::Calendar>,
     /// The stored event when editing one.
@@ -50,6 +51,7 @@ impl Editor {
             _ => "10".into(),
         };
         Editor {
+            details: calendio_core::details::EventDetails { busy: !form.all_day, ..Default::default() },
             calendar_id: 1,
             calendars: Vec::new(),
             start_time: form.start.format("%H:%M").to_string(),
@@ -102,7 +104,7 @@ impl Editor {
         let modal = egui::Modal::new(Id::new("editor"))
             .frame(egui::Frame::window(&ctx.global_style()).inner_margin(20.0))
             .show(ctx, |ui| {
-                ui.set_width(420.0);
+                ui.set_width((ctx.content_rect().width() - 48.0).clamp(240.0, 420.0));
                 let name = self
                     .calendars
                     .iter()
@@ -115,7 +117,17 @@ impl Editor {
                     }
                 });
                 ui.add_space(10.0);
-                out = self.body(ui);
+                if self.asking.is_some() {
+                    if let Some(error) = &self.error {
+                        ui.label(RichText::new(error).color(theme::DANGER));
+                    }
+                }
+                egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 140.0).max(120.0)).show(
+                    ui,
+                    |ui| {
+                        out = self.body(ui);
+                    },
+                );
             });
         if out.is_none() && modal.should_close() && self.asking.is_none() {
             out = Some(Outcome::Close);
@@ -181,6 +193,35 @@ impl Editor {
                 f.end = f.end.date().and_time(NaiveTime::MIN);
                 f.start = f.start.date().and_time(NaiveTime::MIN);
             }
+            if was != f.all_day {
+                self.details.busy = !f.all_day;
+            }
+            ui.end_row();
+
+            ui.label(RichText::new("Location").color(theme::INK_2));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.details.location)
+                    .hint_text("Place or address")
+                    .desired_width(f32::INFINITY),
+            );
+            ui.end_row();
+            ui.label(RichText::new("Meeting link").color(theme::INK_2));
+            ui.vertical(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.details.meeting_url)
+                        .hint_text("https://…")
+                        .desired_width(f32::INFINITY),
+                );
+                if !self.details.meeting_url.is_empty() && self.details.clean().is_ok() {
+                    ui.hyperlink_to("Open meeting", &self.details.meeting_url);
+                }
+            });
+            ui.end_row();
+            ui.label(RichText::new("Show as").color(theme::INK_2));
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.details.busy, true, "Busy");
+                ui.selectable_value(&mut self.details.busy, false, "Free");
+            });
             ui.end_row();
 
             ui.label(RichText::new("Repeat").color(theme::INK_2));

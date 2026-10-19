@@ -165,3 +165,29 @@ fn a_booking_keeps_its_own_gap_after_it() {
     // 10:00 (which needs 10:30–10:40 clear) is fine.
     assert_eq!(monday(&db), ["10:00", "10:30", "11:00", "11:30"]);
 }
+
+#[test]
+fn confirmed_bookings_cannot_be_marked_free_or_double_booked() {
+    let db = Db::open_in_memory().unwrap();
+    setup(&db);
+    let booked = db.book(&request("2026-10-19T03:00:00Z"), DHAKA, now()).unwrap();
+    let event_id =
+        db.conn().query_row("SELECT id FROM events WHERE booking_id=?1", [booked.id], |r| r.get::<_, i64>(0)).unwrap();
+    assert!(db
+        .set_event_details(event_id, &calendio_core::details::EventDetails { busy: false, ..Default::default() })
+        .is_err());
+    let original = db.event(event_id).unwrap().unwrap();
+    let mut changed = original.input.clone();
+    changed.title = "Should roll back".into();
+    assert!(db
+        .update_event_with_details(
+            event_id,
+            &changed,
+            Some(1),
+            Some(&calendio_core::details::EventDetails { busy: false, ..Default::default() })
+        )
+        .is_err());
+    assert_eq!(db.event(event_id).unwrap().unwrap().input, original.input);
+    assert!(!monday(&db).contains(&"09:00".to_string()));
+    assert!(db.book(&request("2026-10-19T03:00:00Z"), DHAKA, now()).is_err());
+}

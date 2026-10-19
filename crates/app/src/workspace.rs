@@ -17,6 +17,7 @@ pub struct Workspace {
     pub selected: i64,
     pub search_open: bool,
     query: String,
+    focus_search: bool,
     results: Vec<Event>,
     manage_open: bool,
     drafts: Vec<Calendar>,
@@ -35,6 +36,7 @@ impl Workspace {
             selected: 1,
             search_open: false,
             query: String::new(),
+            focus_search: false,
             results: Vec::new(),
             manage_open: false,
             drafts: Vec::new(),
@@ -56,10 +58,17 @@ impl Workspace {
         }
         Ok(())
     }
-    pub fn toolbar(&mut self, ui: &mut egui::Ui) {
+    pub fn open_search(&mut self) {
+        self.search_open = true;
+        self.focus_search = true;
+    }
+    pub fn toolbar(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut quick = false;
         ui.horizontal_wrapped(|ui| {
-            if ui.selectable_label(self.search_open, "Search events").clicked() {
+            quick = ui.button("Quick add").on_hover_text("Q · Write an event in one line").clicked();
+            if ui.selectable_label(self.search_open, "Search events").on_hover_text("Ctrl+K").clicked() {
                 self.search_open = !self.search_open;
+                self.focus_search = self.search_open;
             }
             if ui.button("Calendars").clicked() {
                 self.drafts = self.calendars.clone();
@@ -73,6 +82,7 @@ impl Workspace {
             ui.separator();
             self.calendar_picker(ui, "new-event-calendar");
         });
+        quick
     }
     pub fn calendar_picker(&mut self, ui: &mut egui::Ui, id: &str) {
         let name = self.calendars.iter().find(|c| c.id == self.selected).map(|c| c.name.as_str()).unwrap_or("Personal");
@@ -103,9 +113,13 @@ impl Workspace {
     pub fn search(&mut self, ui: &mut egui::Ui, db: &Db, tz: Tz) -> Option<(Form, Event)> {
         let response = ui.add(
             egui::TextEdit::singleline(&mut self.query)
-                .hint_text("Search titles and notes across every calendar")
+                .hint_text("Search titles, notes, and locations across every calendar")
                 .desired_width(f32::INFINITY),
         );
+        if self.focus_search {
+            response.request_focus();
+            self.focus_search = false;
+        }
         if response.changed() {
             match db.search_events(&self.query) {
                 Ok(results) => self.results = results,

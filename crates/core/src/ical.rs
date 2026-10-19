@@ -22,6 +22,8 @@ struct Property {
 struct Item {
     uid: String,
     event: EventInput,
+    details: crate::details::EventDetails,
+    details_present: bool,
     original: Option<String>,
     cancelled: bool,
     excluded: Vec<String>,
@@ -247,6 +249,9 @@ fn parse_item(properties: &[Property], fallback: Tz, warnings: &mut HashSet<Stri
             | "SEQUENCE"
             | "X-CALENDIO-TIMEZONE"
             | "COLOR"
+            | "LOCATION"
+            | "URL"
+            | "TRANSP"
             | "X-CALENDIO-REMINDER"
             | "X-CALENDIO-ALARM" => {}
             name => {
@@ -272,7 +277,19 @@ fn parse_item(properties: &[Property], fallback: Tz, warnings: &mut HashSet<Stri
             .map(|p| p.value.parse::<i64>().map_err(|_| bad("Invalid reminder minutes")))
             .transpose()?,
     };
-    Ok(Item { uid, event, original, cancelled, excluded })
+    let details = crate::details::EventDetails {
+        location: one("LOCATION")?.map(|p| text(&p.value)).transpose()?.unwrap_or_default(),
+        meeting_url: one("URL")?.map(|p| p.value.clone()).unwrap_or_default(),
+        busy: match one("TRANSP")?.map(|p| p.value.to_ascii_uppercase()) {
+            Some(v) if v == "TRANSPARENT" => false,
+            Some(v) if v == "OPAQUE" => true,
+            Some(_) => return Err(bad("Unknown ICS transparency value")),
+            None => !event.all_day,
+        },
+    }
+    .clean()?;
+    let details_present = properties.iter().any(|p| matches!(p.name.as_str(), "LOCATION" | "URL" | "TRANSP"));
+    Ok(Item { uid, event, details, details_present, original, cancelled, excluded })
 }
 fn parse(input: &str, fallback: Tz) -> Result<(Vec<Item>, Vec<String>)> {
     if input.len() > 8 * 1024 * 1024 {
@@ -411,7 +428,14 @@ fn time_property(name: &str, value: &str, event: &EventInput) -> Result<String> 
         }
     }
 }
-fn emit_event(out: &mut String, uid: &str, event: &EventInput, original: Option<&str>, cancelled: bool) -> Result<()> {
+fn emit_event(
+    out: &mut String,
+    uid: &str,
+    event: &EventInput,
+    details: &crate::details::EventDetails,
+    original: Option<&str>,
+    cancelled: bool,
+) -> Result<()> {
     emit(out, "BEGIN:VEVENT");
     emit(out, &format!("UID:{uid}"));
     emit(out, &format!("DTSTAMP:{}", Utc::now().format("%Y%m%dT%H%M%SZ")));
@@ -419,6 +443,13 @@ fn emit_event(out: &mut String, uid: &str, event: &EventInput, original: Option<
     emit(out, &time_property("DTEND", &event.end, event)?);
     emit(out, &format!("SUMMARY:{}", escaped(&event.title)));
     emit(out, &format!("DESCRIPTION:{}", escaped(&event.notes)));
+    if !details.location.is_empty() {
+        emit(out, &format!("LOCATION:{}", escaped(&details.location)));
+    }
+    if !details.meeting_url.is_empty() {
+        emit(out, &format!("URL:{}", details.meeting_url));
+    }
+    emit(out, if details.busy { "TRANSP:OPAQUE" } else { "TRANSP:TRANSPARENT" });
     emit(out, &format!("X-CALENDIO-TIMEZONE:{}", event.tz));
     if let Some(original) = original {
         emit(out, &time_property("RECURRENCE-ID", original, event)?);
@@ -461,7 +492,8 @@ impl Db {
                 .query_row("SELECT uid FROM event_uids WHERE event_id=?1", [event.id], |r| r.get::<_, String>(0))
                 .optional()?
                 .unwrap_or_else(|| format!("{}@calendio.local", event.id));
-            emit_event(&mut out, &uid, &event.input, None, false)?;
+            let details = self.event_details(event.id)?;
+            emit_event(&mut out, &uid, &event.input, &details, None, false)?;
             for x in self.exceptions_for(&[event.id])? {
                 let mut input = event.input.clone();
                 input.rrule = None;
@@ -499,7 +531,7 @@ impl Db {
                             .ok_or_else(|| bad("Exception time is out of range"))?,
                     );
                 }
-                emit_event(&mut out, &uid, &input, Some(&x.original_start), x.cancelled)?;
+                emit_event(&mut out, &uid, &input, &details, Some(&x.original_start), x.cancelled)?;
             }
         }
         emit(&mut out, "END:VCALENDAR");
@@ -534,6 +566,7 @@ impl Db {
                 continue;
             }
             let id = self.create_event(&item.event)?;
+            self.set_event_details(id, &item.details)?;
             tx.execute("UPDATE events SET calendar_id=?2 WHERE id=?1", params![id, calendar_id])?;
             tx.execute("DELETE FROM event_uids WHERE event_id=?1", [id])?;
             tx.execute(
@@ -562,6 +595,9 @@ impl Db {
             }
             if let Some(&id) = masters.get(&item.uid) {
                 let master = self.event(id)?.ok_or_else(|| bad("Missing series master"))?;
+                if item.details_present && item.details != self.event_details(id)? {
+                    return Err(bad("Per-occurrence location, meeting link, or availability changes are not supported; edit the series instead"));
+                }
                 if master.all_day != item.event.all_day {
                     return Err(bad("Exception and series date types differ"));
                 }

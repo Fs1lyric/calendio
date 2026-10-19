@@ -3,4 +3,5 @@ pub mod db;
 pub mod recur;
 pub mod slots;
 
+pub mod details;
 pub mod ical;

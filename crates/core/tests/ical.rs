@@ -125,7 +125,7 @@ fn export_folds_utf8_at_75_octets_without_splitting_characters() {
 }
 
 #[test]
-fn export_only_selected_calendar_and_import_reports_lossy_metadata() {
+fn export_only_selected_calendar_and_import_preserves_location() {
     let db = Db::open_in_memory().unwrap();
     db.create_event(&event()).unwrap();
     let other = db.create_calendar("Work", "#2457b2").unwrap();
@@ -134,7 +134,9 @@ fn export_only_selected_calendar_and_import_reports_lossy_metadata() {
         &vevent("loc", ":20261019T090000Z", ":20261019T100000Z").replace("END:VEVENT", "LOCATION:Studio\r\nEND:VEVENT"),
     );
     let report = db.import_ics(other, &data, "UTC").unwrap();
-    assert!(report.warnings.iter().any(|w| w.contains("LOCATION")));
+    assert!(!report.warnings.iter().any(|w| w.contains("LOCATION")));
+    let imported = db.all_events().unwrap().into_iter().find(|e| db.event_calendar(e.id).unwrap() == other).unwrap();
+    assert_eq!(db.event_details(imported.id).unwrap().location, "Studio");
 }
 
 #[test]
@@ -192,4 +194,22 @@ fn external_display_alarm_and_timed_until_are_interoperable() {
         db.occurrences_between(from, to).unwrap().iter().filter(|o| o.event_id == id).count(),
         target.occurrences_between(from, to).unwrap().iter().filter(|o| o.title == e.title).count()
     );
+}
+
+#[test]
+fn event_locations_links_and_availability_survive_interchange() {
+    use calendio_core::details::EventDetails;
+    let db = Db::open_in_memory().unwrap();
+    let details = EventDetails {
+        location: "Studio, north wing".into(),
+        meeting_url: "https://meet.example.com/planning".into(),
+        busy: false,
+    };
+    db.create_event_with_details(&event(), 1, &details).unwrap();
+    let data = db.export_ics(1).unwrap();
+    assert!(data.contains("LOCATION:Studio\\, north wing"));
+    assert!(data.contains("TRANSP:TRANSPARENT"));
+    let imported = Db::open_in_memory().unwrap();
+    imported.import_ics(1, &data, "UTC").unwrap();
+    assert_eq!(imported.event_details(imported.all_events().unwrap()[0].id).unwrap(), details);
 }

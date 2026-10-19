@@ -43,7 +43,7 @@ fn day(s: &str) -> Result<NaiveDate> {
 
 /// The instant a stored value stands for. All-day dates start at midnight in
 /// the event's zone.
-fn instant(s: &str, all_day: bool, tz: Tz) -> Result<DateTime<Utc>> {
+pub(crate) fn instant(s: &str, all_day: bool, tz: Tz) -> Result<DateTime<Utc>> {
     if !all_day {
         return s.parse().map_err(|_| Error::Invalid(format!("not a date and time: {s}")));
     }

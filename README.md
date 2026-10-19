@@ -13,6 +13,7 @@ Calendly. See [ROADMAP.md](ROADMAP.md) for the remaining product scope.
 cargo run -p calendio
 # Or open a specific view:
 cargo run -p calendio -- --view agenda
+cargo run -p calendio -- --quick-add
 cargo run -p calendio-booker -- --port 8788
 ```
 
@@ -26,7 +27,10 @@ service is deployed by creating this repository.
 
 - Month, week, day, 30-day agenda, and year overview.
 - Multiple calendars with names, colors, visibility, event assignment and safe removal.
-- Literal, case-insensitive Unicode search across event titles and notes.
+- Quick add: `Design review tomorrow at 14:30 for 45m`, reviewed before saving.
+- Locations, validated meeting links, and Free/Busy status, including busy all-day events.
+- Mini-calendar navigation and an independent today agenda on wide windows.
+- Literal, case-insensitive Unicode search across event titles, notes, and locations.
 - ICS file import/export, including recurring events and exceptions; see
   [interchange support](docs/ical.md).
 - Click to create/edit and drag to move events.
@@ -57,7 +61,13 @@ original MIT license declaration; inherited third-party terms still apply.
 
 ## Interface previews
 
+- [Calendar workspace](docs/workspace-preview.png)
+- [Event editor](docs/event-editor-preview.png)
+- [Quick add](docs/quick-add-preview.png)
 - [Year overview](docs/year-preview.png)
 - [Agenda](docs/agenda-preview.png)
 
 Screenshots use a disposable database containing synthetic events.
+
+Keyboard shortcuts: **Q** quick add, **Ctrl+K** search, **N** new event,
+**T** today, **M/W/D** views, **J/K** previous/next period.

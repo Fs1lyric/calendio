@@ -89,10 +89,18 @@ impl Db {
         if needle.is_empty() {
             return Ok(Vec::new());
         }
+        let mut stmt = self.conn().prepare("SELECT event_id,location FROM event_details")?;
+        let locations = stmt
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<HashMap<_, _>>>()?;
         Ok(self
             .all_events()?
             .into_iter()
-            .filter(|e| e.title.to_lowercase().contains(&needle) || e.notes.to_lowercase().contains(&needle))
+            .filter(|e| {
+                e.title.to_lowercase().contains(&needle)
+                    || e.notes.to_lowercase().contains(&needle)
+                    || locations.get(&e.id).is_some_and(|v| v.to_lowercase().contains(&needle))
+            })
             .collect())
     }
 
