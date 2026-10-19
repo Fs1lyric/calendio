@@ -64,8 +64,8 @@ fn chip(ui: &Ui, rect: Rect, color: Color32, lines: &[(String, f32, Color32)], n
         y += size + 3.0;
     }
     if let Some(notes) = notes {
-        let galley = p.layout(notes.to_owned(), font(11.0), theme::INK_2, (rect.width() - 10.0).max(1.0));
-        p.galley(Pos2::new(rect.left() + 7.0, y), galley, theme::INK_2);
+        let galley = p.layout(notes.to_owned(), font(11.0), theme::ink_2(), (rect.width() - 10.0).max(1.0));
+        p.galley(Pos2::new(rect.left() + 7.0, y), galley, theme::ink_2());
     }
 }
 
@@ -105,7 +105,7 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
 
     for (i, name) in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].iter().enumerate() {
         let x = full.left() + w * (i as f32 + 0.5);
-        painter.text(Pos2::new(x, full.top() + head / 2.0), Align2::CENTER_CENTER, name, font(12.0), theme::INK_3);
+        painter.text(Pos2::new(x, full.top() + head / 2.0), Align2::CENTER_CENTER, name, font(12.0), theme::ink_3());
     }
 
     for (i, &day) in days.iter().enumerate() {
@@ -115,9 +115,9 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
             egui::vec2(w, h),
         );
         let r = ui.interact(cell, Id::new(("cell", day)), Sense::click());
-        let fill = if r.hovered() { theme::SURFACE } else { theme::BG };
+        let fill = if r.hovered() { theme::surface() } else { theme::bg() };
         painter.rect_filled(cell, 0.0, fill);
-        painter.rect_stroke(cell, 0.0, Stroke::new(0.5, theme::LINE), StrokeKind::Inside);
+        painter.rect_stroke(cell, 0.0, Stroke::new(0.5, theme::line()), StrokeKind::Inside);
         if r.clicked() {
             action = Some(Action::New { start: at(day, 9), end: at(day, 10), all_day: false });
         }
@@ -127,14 +127,14 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
         let num_center = Pos2::new(cell.left() + 16.0, cell.top() + 14.0);
         let num_rect = Rect::from_center_size(num_center, egui::vec2(24.0, 22.0));
         if today {
-            painter.circle_filled(num_center, 11.0, theme::ACCENT);
+            painter.circle_filled(num_center, 11.0, theme::accent());
         }
         let num_color = if today {
-            theme::BG
+            theme::bg()
         } else if in_month {
-            theme::INK
+            theme::ink()
         } else {
-            theme::INK_3
+            theme::ink_3()
         };
         painter.text(num_center, Align2::CENTER_CENTER, day.day(), font(13.0), num_color);
         if ui.interact(num_rect, Id::new(("num", day)), Sense::click()).on_hover_text("Open this day").clicked() {
@@ -166,7 +166,7 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
             if hidden > 0 && n + 1 == room {
                 let more = Rect::from_min_max(Pos2::new(r.right() - 30.0, r.top()), r.max);
                 r.max.x -= 32.0;
-                painter.text(more.center(), Align2::CENTER_CENTER, format!("+{hidden}"), font(12.0), theme::INK_2);
+                painter.text(more.center(), Align2::CENTER_CENTER, format!("+{hidden}"), font(12.0), theme::ink_2());
                 let resp = ui.interact(more, Id::new(("more", day)), Sense::click());
                 if resp.on_hover_text(format!("{hidden} more")).clicked() {
                     action = Some(Action::Goto(day));
@@ -178,7 +178,7 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
             } else {
                 format!("{} {}", grid::local(&o.start, s.tz).format("%H:%M"), o.title)
             };
-            chip(ui, r, color, &[(text, 12.0, theme::INK)], None);
+            chip(ui, r, color, &[(text, 12.0, theme::ink())], None);
             if with_notes(ui.interact(r, Id::new(("mchip", k, day)), Sense::click()), &o.notes).clicked() {
                 action = Some(Action::Open(k));
             }
@@ -214,13 +214,13 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
             Align2::CENTER_CENTER,
             day.format("%a").to_string().to_uppercase(),
             font(11.0),
-            if today { theme::ACCENT } else { theme::INK_3 },
+            if today { theme::accent() } else { theme::ink_3() },
         );
         let c = Pos2::new(r.center().x, r.top() + 30.0);
         if today {
-            p.circle_filled(c, 13.0, theme::ACCENT);
+            p.circle_filled(c, 13.0, theme::accent());
         }
-        p.text(c, Align2::CENTER_CENTER, day.day(), font(17.0), if today { theme::BG } else { theme::INK });
+        p.text(c, Align2::CENTER_CENTER, day.day(), font(17.0), if today { theme::bg() } else { theme::ink() });
         if days.len() > 1 && ui.interact(r, Id::new(("head", day)), Sense::click()).clicked() {
             action = Some(Action::Goto(day));
         }
@@ -249,11 +249,11 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
         Align2::RIGHT_CENTER,
         "all day",
         font(11.0),
-        theme::INK_3,
+        theme::ink_3(),
     );
     for (i, &day) in days.iter().enumerate() {
         let r = Rect::from_min_size(Pos2::new(col_x(i), lane_rect.top()), egui::vec2(col_w, lane_rect.height()));
-        ui.painter().rect_stroke(r, 0.0, Stroke::new(0.5, theme::LINE), StrokeKind::Inside);
+        ui.painter().rect_stroke(r, 0.0, Stroke::new(0.5, theme::line()), StrokeKind::Inside);
         if ui.interact(r, Id::new(("lane", day)), Sense::click()).clicked() {
             action = Some(Action::New { start: at(day, 0), end: at(day, 0), all_day: true });
         }
@@ -264,7 +264,7 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
             Pos2::new(col_x(b as usize) - 2.0, lane_rect.top() + 2.0 + (lane.column + 1) as f32 * lane_h),
         );
         let o = &s.occ[k];
-        chip(ui, r, theme::hex(o.color.as_deref()), &[(o.title.clone(), 12.0, theme::INK)], None);
+        chip(ui, r, theme::hex(o.color.as_deref()), &[(o.title.clone(), 12.0, theme::ink())], None);
         if with_notes(ui.interact(r, Id::new(("achip", k)), Sense::click()), &o.notes).clicked() {
             action = Some(Action::Open(k));
         }
@@ -283,7 +283,7 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
             let y = body.top() + h as f32 * HOUR_PX;
             p.line_segment(
                 [Pos2::new(body.left() + GUTTER, y), Pos2::new(body.right(), y)],
-                Stroke::new(0.5, theme::LINE),
+                Stroke::new(0.5, theme::line()),
             );
             if h > 0 {
                 p.text(
@@ -291,7 +291,7 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
                     Align2::RIGHT_CENTER,
                     format!("{h:02}:00"),
                     font(11.0),
-                    theme::INK_3,
+                    theme::ink_3(),
                 );
             }
         }
@@ -304,7 +304,7 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
         // Empty space: click for an hour, drag to sweep out a span.
         for (i, &day) in days.iter().enumerate() {
             let rect = col(i);
-            p.line_segment([rect.left_top(), rect.left_bottom()], Stroke::new(0.5, theme::LINE));
+            p.line_segment([rect.left_top(), rect.left_bottom()], Stroke::new(0.5, theme::line()));
             let r = ui.interact(rect, Id::new(("col", day)), Sense::click_and_drag());
             if r.clicked() {
                 if let Some(pos) = r.interact_pointer_pos() {
@@ -326,10 +326,10 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
                 Pos2::new(col(day).left() + 2.0, body.top() + a as f32 / 60.0 * HOUR_PX),
                 Pos2::new(col(day).right() - 4.0, body.top() + b as f32 / 60.0 * HOUR_PX),
             );
-            p.rect_filled(ghost, CornerRadius::same(4), theme::soft(theme::ACCENT));
-            p.rect_stroke(ghost, CornerRadius::same(4), Stroke::new(1.0, theme::ACCENT), StrokeKind::Inside);
+            p.rect_filled(ghost, CornerRadius::same(4), theme::soft(theme::accent()));
+            p.rect_stroke(ghost, CornerRadius::same(4), Stroke::new(1.0, theme::accent()), StrokeKind::Inside);
             let label = format!("{} – {}", hm(a), hm(b));
-            p.text(ghost.left_top() + egui::vec2(6.0, 4.0), Align2::LEFT_TOP, label, font(11.0), theme::INK);
+            p.text(ghost.left_top() + egui::vec2(6.0, 4.0), Align2::LEFT_TOP, label, font(11.0), theme::ink());
             if ui.input(|i| i.pointer.any_released()) {
                 let midnight = days[day].and_time(NaiveTime::MIN);
                 action = Some(Action::New {
@@ -355,12 +355,12 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
                 );
                 let moving = matches!(drag, Some(Drag::Move { index, .. }) if index == k);
                 let color = theme::hex(o.color.as_deref());
-                let ink = if moving { theme::INK_3 } else { theme::INK };
+                let ink = if moving { theme::ink_3() } else { theme::ink() };
                 let start = grid::local(&o.start, s.tz);
                 let end = grid::local(&o.end, s.tz);
                 let mut lines = vec![(o.title.clone(), 13.0, ink)];
                 if r.height() > 34.0 {
-                    lines.push((format!("{} – {}", start.format("%H:%M"), end.format("%H:%M")), 11.0, theme::INK_2));
+                    lines.push((format!("{} – {}", start.format("%H:%M"), end.format("%H:%M")), 11.0, theme::ink_2()));
                 }
                 chip(ui, r, color, &lines, block_notes(&o.notes, r.height()));
                 let resp = with_notes(ui.interact(r, Id::new(("ev", k, day)), Sense::click_and_drag()), &o.notes);
@@ -399,7 +399,7 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
                 Align2::LEFT_TOP,
                 start.format("%H:%M"),
                 font(11.0),
-                theme::INK,
+                theme::ink(),
             );
             if ui.input(|i| i.pointer.any_released()) {
                 if start != grid::local(&o.start, s.tz) {
@@ -413,8 +413,8 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
         if let Some(i) = days.iter().position(|&d| d == s.now.date()) {
             let y = body.top() + (s.now.hour() * 60 + s.now.minute()) as f32 / 60.0 * HOUR_PX;
             let rect = col(i);
-            p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.5, theme::PINK));
-            p.circle_filled(Pos2::new(rect.left(), y), 4.0, theme::PINK);
+            p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.5, theme::pink()));
+            p.circle_filled(Pos2::new(rect.left(), y), 4.0, theme::pink());
         }
     });
     action
@@ -500,7 +500,7 @@ pub fn year(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
         egui::Grid::new("year-grid").num_columns(columns).spacing([18.0, 20.0]).show(ui, |ui| {
             for month in 1..=12 {
                 let first = NaiveDate::from_ymd_opt(anchor.year(), month, 1).expect("valid month");
-                egui::Frame::new().fill(theme::SURFACE).inner_margin(12.0).corner_radius(8).show(ui, |ui| {
+                egui::Frame::new().fill(theme::surface()).inner_margin(12.0).corner_radius(8).show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.set_width(card_width);
                         ui.spacing_mut().button_padding = egui::vec2(2.0, 2.0);
@@ -508,7 +508,7 @@ pub fn year(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
                         ui.label(egui::RichText::new(first.format("%B").to_string()).strong().size(17.0));
                         egui::Grid::new(("mini-month", month)).num_columns(7).spacing([2.0, 2.0]).show(ui, |ui| {
                             for name in ["M", "T", "W", "T", "F", "S", "S"] {
-                                ui.label(egui::RichText::new(name).small().color(theme::INK_3));
+                                ui.label(egui::RichText::new(name).small().color(theme::ink_3()));
                             }
                             ui.end_row();
                             let start = grid::week_start(first);

@@ -1,14 +1,16 @@
-# Usability and event-detail improvements
+# Complete booking, delivery, sync and recovery
 
-- `core/details.rs`, schema migration, `db.rs`, ICS and tests: persist event
-  location, meeting link, and free/busy status. Save details atomically with
-  events; keep bookings protected; support busy all-day events through DST.
-- `app/quick_add.rs`, tests and toolbar: parse explicit date/time shortcuts,
-  preview the result, then open the regular editor before saving.
-- `app/navigation.rs`, editor and app layout: mini-calendar navigation,
-  integrated event details, and a today agenda on wide windows.
-- Update documentation and screenshots for implemented behavior only.
+1. Core booking flow + public management page: secret guest links, atomic
+   rescheduling/cancellation, conflict checks and durable notification jobs.
+2. Email delivery: Resend adapter, persistent leases, retry/backoff, reminders,
+   stale-job suppression, and organizer copies; test with fake transport.
+3. Google Calendar: refresh-token credentials from environment, paginated
+   incremental pulls, conditional writes/deletes, local change tracking and
+   conflict preservation. Test provider behavior with a fake transport.
+4. Recovery: event undo with conflict guards; consistent SQLite backups,
+   automatic daily snapshots, guarded restore with a safety backup, desktop UI.
 
-Verification: failing behavior tests before code, then workspace tests,
-Clippy, formatting, build, and actual app screenshots against disposable data.
-No accounts, provider credentials, or hosting decisions are required.
+Write behavior tests first. Finish with workspace tests, Clippy, formatting,
+build, management-page checks and desktop screenshots. Never send real mail or
+modify a real Google account during verification. Document credential setup
+and the limits of live integration verification.

@@ -1,7 +1,11 @@
 //! calendio-booker: serves the public booking page and its JSON API from
 //! the same SQLite file the desktop app uses.
 
+mod google;
+mod google_auth;
+mod providers;
 mod remind;
+mod workers;
 
 use axum::extract::{Path, Query, State as Ext};
 use axum::http::StatusCode;
@@ -33,6 +37,12 @@ fn app(state: Arc<State>) -> Router {
         .route("/api/types/{slug}", get(event_type))
         .route("/api/slots", get(slots))
         .route("/api/book", post(book))
+        .route("/manage/{token}", get(manage_page))
+        .route("/api/manage/{token}", get(manage_booking))
+        .route("/api/manage/{token}/slots", get(manage_slots))
+        .route("/api/manage/{token}/reschedule", post(manage_reschedule))
+        .route("/api/manage/{token}/cancel", post(manage_cancel))
+        .layer(axum::extract::DefaultBodyLimit::max(16 * 1024))
         .route("/{slug}", get(page))
         .with_state(state)
 }
@@ -129,9 +139,66 @@ async fn slots(s: Shared, Query(q): Query<SlotQuery>) -> Result<Json<serde_json:
 }
 
 async fn book(s: Shared, Json(req): Json<BookRequest>) -> Result<impl IntoResponse, Failure> {
-    let b = s.db.lock().unwrap().book(&req, s.tz, (s.now)())?;
-    let body = json!({ "title": b.type_title, "start": b.start, "end": b.end, "guest_name": b.guest_name });
-    Ok((StatusCode::CREATED, Json(body)))
+    let receipt = s.db.lock().unwrap().book_with_management(&req, s.tz, (s.now)())?;
+    let b = receipt.booking;
+    Ok((
+        StatusCode::CREATED,
+        Json(
+            json!({"title":b.type_title,"start":b.start,"end":b.end,"guest_name":b.guest_name,"manage_url":format!("/manage/{}",receipt.token)}),
+        ),
+    ))
+}
+fn private_response(response: impl IntoResponse) -> Response {
+    let mut response = response.into_response();
+    let headers = response.headers_mut();
+    headers.insert("cache-control", "no-store".parse().unwrap());
+    headers.insert("referrer-policy", "no-referrer".parse().unwrap());
+    headers.insert("x-frame-options", "DENY".parse().unwrap());
+    headers.insert("content-security-policy","default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'".parse().unwrap());
+    response
+}
+async fn manage_page(s: Shared, Path(token): Path<String>) -> Response {
+    if s.db.lock().unwrap().managed_booking(&token).is_err() {
+        return private_response((StatusCode::NOT_FOUND, "Booking link not found"));
+    }
+    private_response(Html(include_str!("manage.html")))
+}
+async fn manage_booking(s: Shared, Path(token): Path<String>) -> Result<Response, Failure> {
+    let booking = s.db.lock().unwrap().managed_booking(&token)?;
+    Ok(private_response(Json(booking)))
+}
+#[derive(Deserialize)]
+struct ManageSlots {
+    from: String,
+    to: String,
+    tz: String,
+}
+async fn manage_slots(s: Shared, Path(token): Path<String>, Query(q): Query<ManageSlots>) -> Result<Response, Failure> {
+    let from = q.from.parse::<DateTime<Utc>>().map_err(|_| bad("Invalid start date"))?;
+    let to = q.to.parse::<DateTime<Utc>>().map_err(|_| bad("Invalid end date"))?;
+    if to <= from || to - from > Duration::days(62) {
+        return Err(bad("Ask for up to 62 days"));
+    }
+    let zone = q.tz.parse::<Tz>().map_err(|_| bad("Unknown timezone"))?;
+    let slots = s.db.lock().unwrap().reschedule_slots(&token, zone, s.tz, (s.now)(), (from, to))?;
+    Ok(private_response(Json(json!({"slots":slots.into_iter().map(|t|t.to_rfc3339()).collect::<Vec<_>>()}))))
+}
+#[derive(Deserialize)]
+struct RescheduleRequest {
+    start: String,
+    tz: String,
+}
+async fn manage_reschedule(
+    s: Shared,
+    Path(token): Path<String>,
+    Json(req): Json<RescheduleRequest>,
+) -> Result<Response, Failure> {
+    let booking = s.db.lock().unwrap().reschedule(&token, &req.start, &req.tz, s.tz, (s.now)())?;
+    Ok(private_response(Json(booking)))
+}
+async fn manage_cancel(s: Shared, Path(token): Path<String>) -> Result<Response, Failure> {
+    let booking = s.db.lock().unwrap().cancel_managed_booking(&token, (s.now)())?;
+    Ok(private_response(Json(booking)))
 }
 
 const USAGE: &str = "usage: calendio-booker [--port 8788] [--bind 127.0.0.1]";
@@ -143,6 +210,24 @@ fn organizer_tz(db: &Db) -> Tz {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--google-connect") {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
+        let result = runtime.block_on(google_auth::connect());
+        let message = match &result {
+            Ok(()) => "Google Calendar connected".to_string(),
+            Err(error) => error.clone(),
+        };
+        if let Ok(db) = Db::open(&Db::default_path()) {
+            let _ = db.set_setting("google_status", &message);
+        }
+        if result.is_ok() {
+            println!("{message}");
+        } else {
+            eprintln!("{message}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let (mut port, mut bind) = (8788u16, "127.0.0.1".to_string());
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -178,6 +263,7 @@ fn main() {
             let _ = tokio::signal::ctrl_c().await;
         };
         tokio::spawn(remind::run(state.clone()));
+        tokio::spawn(workers::run(state.clone()));
         axum::serve(listener, app(state)).with_graceful_shutdown(stop).await.expect("server");
     });
 }
@@ -302,5 +388,25 @@ mod tests {
         let mut gone = booking("2026-10-19T03:30:00Z");
         gone["slug"] = json!("old");
         assert_eq!(post(&r, "/api/book", gone).await.0, StatusCode::NOT_FOUND);
+    }
+    #[tokio::test]
+    async fn guest_links_change_and_cancel_without_exposing_other_bookings() {
+        let r = router();
+        let (status, created) = post(&r, "/api/book", booking("2026-10-19T03:00:00Z")).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let manage = created["manage_url"].as_str().unwrap();
+        assert_eq!(get(&r, manage).await.0, StatusCode::OK);
+        let api = manage.replace("/manage/", "/api/manage/");
+        assert_eq!(get(&r, &api).await.0, StatusCode::OK);
+        let (status, moved) =
+            post(&r, &format!("{api}/reschedule"), json!({"start":"2026-10-19T03:30:00Z","tz":"Asia/Dhaka"})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(moved["start"], "2026-10-19T03:30:00Z");
+        assert_eq!(post(&r, &format!("{api}/cancel"), json!({})).await.0, StatusCode::OK);
+        assert_eq!(
+            post(&r, &format!("{api}/reschedule"), json!({"start":"2026-10-19T04:00:00Z","tz":"UTC"})).await.0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(get(&r, &format!("/api/manage/{}", "0".repeat(64))).await.0, StatusCode::NOT_FOUND);
     }
 }

@@ -6,6 +6,7 @@ mod form;
 mod grid;
 mod navigation;
 mod quick_add;
+mod recovery_ui;
 mod setup;
 mod theme;
 mod views;
@@ -27,6 +28,8 @@ struct App {
     quick_add: quick_add::QuickAdd,
     navigation: navigation::Navigation,
     today: Vec<navigation::TodayItem>,
+    recovery: recovery_ui::RecoveryUi,
+    theme: theme::Theme,
     tz: Tz,
     view: View,
     anchor: NaiveDate,
@@ -43,12 +46,15 @@ struct App {
 impl App {
     fn new(db: Db, tz: Tz) -> Self {
         let workspace = workspace::Workspace::new(&db);
+        let theme = theme::Theme::parse(&db.setting("theme").ok().flatten().unwrap_or_default());
         App {
+            theme,
             db,
             workspace,
             quick_add: quick_add::QuickAdd::default(),
             navigation: navigation::Navigation::new(Utc::now().with_timezone(&tz).date_naive()),
             today: Vec::new(),
+            recovery: recovery_ui::RecoveryUi::default(),
             tz,
             view: View::Week,
             anchor: Utc::now().with_timezone(&tz).date_naive(),
@@ -160,18 +166,29 @@ impl App {
         calendar_id: i64,
         details: &calendio_core::details::EventDetails,
     ) -> calendio_core::db::Result<()> {
-        match save {
-            Save::Create(event) => self.db.create_event_with_details(event, calendar_id, details).map(drop),
-            Save::Update(id, event) => self.db.update_event_with_details(*id, event, Some(calendar_id), Some(details)),
-            Save::Exception(exception) => {
-                if details.clean()? != self.db.event_details(exception.event_id)? {
-                    return Err(calendio_core::db::Error::Invalid(
-                        "To change location, meeting link, or availability, choose the entire series".into(),
-                    ));
+        let target = match save {
+            Save::Create(_) => None,
+            Save::Update(id, _) => Some(*id),
+            Save::Exception(x) => Some(x.event_id),
+        };
+        self.db
+            .record_edit("event change", target, |db| match save {
+                Save::Create(event) => db.create_event_with_details(event, calendar_id, details),
+                Save::Update(id, event) => {
+                    db.update_event_with_details(*id, event, Some(calendar_id), Some(details))?;
+                    Ok(*id)
                 }
-                self.apply(save, Some(calendar_id))
-            }
-        }
+                Save::Exception(exception) => {
+                    if details.clean()? != self.db.event_details(exception.event_id)? {
+                        return Err(calendio_core::db::Error::Invalid(
+                            "To change location, meeting link, or availability, choose the entire series".into(),
+                        ));
+                    }
+                    self.apply(save, Some(calendar_id))?;
+                    Ok(exception.event_id)
+                }
+            })
+            .map(drop)
     }
 
     /// A drag drop: a single event moves, a series moves just this occurrence.
@@ -182,7 +199,15 @@ impl App {
         let length = f.end - f.start;
         (f.start, f.end) = (start, start + length);
         let result = f.save(Scope::One, Some(&e)).map_err(|m| m.to_string());
-        match result.and_then(|s| self.apply(&s, None).map_err(|e| e.to_string())) {
+        match result.and_then(|save| {
+            self.db
+                .record_edit("move event", Some(e.id), |_| {
+                    self.apply(&save, None)?;
+                    Ok(e.id)
+                })
+                .map(drop)
+                .map_err(|e| e.to_string())
+        }) {
             Ok(()) => self.stale = true,
             Err(e) => self.error = Some(e),
         }
@@ -195,7 +220,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             if !narrow {
-                ui.label(RichText::new("Calendio").strong().color(theme::ACCENT).size(16.0));
+                ui.label(RichText::new("Calendio").strong().color(theme::accent()).size(16.0));
                 ui.add_space(12.0);
             }
             if self.booking.is_some() {
@@ -336,6 +361,7 @@ impl App {
 impl App {
     fn show(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        self.theme.apply(&ctx);
         self.keys(&ctx);
         self.reload();
         ctx.request_repaint_after(std::time::Duration::from_secs(30));
@@ -345,7 +371,7 @@ impl App {
             self.top_bar(ui);
             if let Some(e) = self.error.clone() {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(e).color(theme::DANGER));
+                    ui.label(RichText::new(e).color(theme::danger()));
                     if ui.small_button("Dismiss").clicked() {
                         self.error = None;
                     }
@@ -355,6 +381,37 @@ impl App {
             if self.workspace.toolbar(ui) {
                 self.quick_add.open();
             }
+            ui.horizontal_wrapped(|ui| {
+                let label = self.db.undo_label().ok().flatten();
+                if ui
+                    .add_enabled(label.is_some(), egui::Button::new("Undo"))
+                    .on_hover_text(label.unwrap_or_else(|| "Nothing to undo".into()))
+                    .clicked()
+                {
+                    match self.db.undo() {
+                        Ok(_) => self.stale = true,
+                        Err(error) => self.error = Some(error.to_string()),
+                    }
+                }
+                let previous = self.theme;
+                egui::ComboBox::from_id_salt("theme-picker")
+                    .selected_text(format!("Theme: {}", self.theme.label()))
+                    .show_ui(ui, |ui| {
+                        for theme in theme::Theme::ALL {
+                            ui.selectable_value(&mut self.theme, theme, theme.label());
+                        }
+                    });
+                if self.theme != previous {
+                    if let Err(error) = self.db.set_setting("theme", self.theme.id()) {
+                        self.error = Some(error.to_string());
+                    }
+                    self.theme.apply(&ctx);
+                    ctx.request_repaint();
+                }
+                if ui.button("Recovery & connections").clicked() {
+                    self.recovery.open = true;
+                }
+            });
             ui.add_space(6.0);
         });
         if self.workspace.search_open {
@@ -374,7 +431,7 @@ impl App {
                         self.new_event();
                     }
                     ui.add_space(20.0);
-                    ui.label(RichText::new("CALENDAR").size(11.0).color(theme::INK_3));
+                    ui.label(RichText::new("CALENDAR").size(11.0).color(theme::ink_3()));
                     for (view, name) in [
                         (View::Year, "Year"),
                         (View::Agenda, "Agenda"),
@@ -387,23 +444,23 @@ impl App {
                         }
                     }
                     ui.add_space(20.0);
-                    ui.label(RichText::new("SCHEDULING").size(11.0).color(theme::INK_3));
+                    ui.label(RichText::new("SCHEDULING").size(11.0).color(theme::ink_3()));
                     if ui.selectable_label(self.booking.is_some(), "Booking links & hours").clicked() {
                         self.open_booking();
                     }
                     ui.add_space(24.0);
                     ui.separator();
                     ui.add_space(8.0);
-                    ui.label(RichText::new("MY CALENDARS").size(11.0).color(theme::INK_3));
+                    ui.label(RichText::new("MY CALENDARS").size(11.0).color(theme::ink_3()));
                     match self.workspace.sidebar(ui, &self.db) {
                         Ok(changed) => self.stale |= changed,
                         Err(e) => self.error = Some(e),
                     }
                     ui.add_space(20.0);
-                    ui.label(RichText::new("TIMEZONE").size(11.0).color(theme::INK_3));
+                    ui.label(RichText::new("TIMEZONE").size(11.0).color(theme::ink_3()));
                     ui.label(self.tz.to_string());
                     ui.add_space(16.0);
-                    ui.label(RichText::new("Stored on this device").small().color(theme::INK_3));
+                    ui.label(RichText::new("Stored on this device").small().color(theme::ink_3()));
                 });
             });
         }
@@ -440,6 +497,9 @@ impl App {
             self.editor = Some(self.make_editor(form, None));
         }
         self.editor_frame(&ctx);
+        if self.recovery.show(&ctx, &mut self.db) {
+            self.stale = true;
+        }
     }
 }
 
@@ -484,8 +544,20 @@ impl App {
             None => return,
             Some(Outcome::Close) => Ok(()),
             Some(Outcome::Save(s)) => self.save_editor(s, calendar_id, &details),
-            Some(Outcome::DeleteEvent(id)) => self.db.delete_event(*id),
-            Some(Outcome::DeleteOne(x)) => self.db.set_exception(x),
+            Some(Outcome::DeleteEvent(id)) => self
+                .db
+                .record_edit("delete event", Some(*id), |db| {
+                    db.delete_event(*id)?;
+                    Ok(*id)
+                })
+                .map(drop),
+            Some(Outcome::DeleteOne(x)) => self
+                .db
+                .record_edit("cancel occurrence", Some(x.event_id), |db| {
+                    db.set_exception(x)?;
+                    Ok(x.event_id)
+                })
+                .map(drop),
         };
         match result {
             Ok(()) => {
@@ -501,7 +573,7 @@ impl App {
     }
 }
 
-const USAGE: &str = "usage: calendio [--view month|week|day|agenda|year] [--booking] [--new] [--quick-add]";
+const USAGE: &str = "usage: calendio [--view month|week|day|agenda|year] [--booking] [--new] [--quick-add] [--theme system|white|dark|catppuccin|tokyo-night|gruvbox|everforest|rose-pine|nord] [--recovery]";
 
 /// Vsync stays off: on Wayland a vsynced swap waits for a frame callback, and Hyprland
 /// sends none to a window on a hidden workspace, so the 30s repaint would block the
@@ -523,6 +595,8 @@ fn main() -> eframe::Result {
     let mut quick_add = false;
     let mut quick_entry = false;
     let mut booking = false;
+    let mut selected_theme = None;
+    let mut recovery = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -542,6 +616,15 @@ fn main() -> eframe::Result {
             "--new" => quick_add = true,
             "--quick-add" => quick_entry = true,
             "--booking" => booking = true,
+            "--recovery" => recovery = true,
+            "--theme" => {
+                let value = args.next().unwrap_or_default();
+                if !theme::Theme::ALL.iter().any(|t| t.id() == value) {
+                    eprintln!("{USAGE}");
+                    std::process::exit(2);
+                }
+                selected_theme = Some(theme::Theme::parse(&value));
+            }
             _ => {
                 eprintln!("{USAGE}");
                 std::process::exit(2);
@@ -563,6 +646,10 @@ fn main() -> eframe::Result {
             theme::apply(&cc.egui_ctx);
             let mut app = App::new(db, tz);
             app.view = view;
+            app.recovery.open = recovery;
+            if let Some(theme) = selected_theme {
+                app.theme = theme;
+            }
             if booking {
                 app.open_booking();
             }
@@ -579,6 +666,16 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    #[test]
+    fn saved_theme_is_loaded_on_startup() {
+        for theme in theme::Theme::ALL {
+            let db = Db::open_in_memory().unwrap();
+            db.set_setting("theme", theme.id()).unwrap();
+            assert_eq!(App::new(db, chrono_tz::UTC).theme, theme);
+        }
+    }
+
     #[test]
     fn swaps_never_wait_on_the_compositor() {
         assert!(!super::native_options().glow_options.vsync);
@@ -682,7 +779,7 @@ mod improvement_tests {
     #[test]
     fn complete_app_renders_calendar_editor_and_quick_add_at_supported_sizes() {
         for (width, height) in [(360.0, 320.0), (800.0, 780.0), (1904.0, 949.0)] {
-            for state in 0..3 {
+            for state in 0..4 {
                 let ctx = egui::Context::default();
                 theme::apply(&ctx);
                 let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
@@ -691,6 +788,9 @@ mod improvement_tests {
                 }
                 if state == 2 {
                     app.quick_add.open();
+                }
+                if state == 3 {
+                    app.recovery.open = true;
                 }
                 for _ in 0..2 {
                     let mut used = 0.0;

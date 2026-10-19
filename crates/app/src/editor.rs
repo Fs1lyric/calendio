@@ -119,7 +119,7 @@ impl Editor {
                 ui.add_space(10.0);
                 if self.asking.is_some() {
                     if let Some(error) = &self.error {
-                        ui.label(RichText::new(error).color(theme::DANGER));
+                        ui.label(RichText::new(error).color(theme::danger()));
                     }
                 }
                 egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 140.0).max(120.0)).show(
@@ -154,7 +154,7 @@ impl Editor {
 
         let f = &mut self.form;
         egui::Grid::new("editor-grid").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
-            ui.label(RichText::new("Starts").color(theme::INK_2));
+            ui.label(RichText::new("Starts").color(theme::ink_2()));
             ui.horizontal(|ui| {
                 let mut day = f.start.date();
                 if date_button(ui, "start-day", &mut day) {
@@ -168,7 +168,7 @@ impl Editor {
             });
             ui.end_row();
 
-            ui.label(RichText::new(if f.all_day { "Last day" } else { "Ends" }).color(theme::INK_2));
+            ui.label(RichText::new(if f.all_day { "Last day" } else { "Ends" }).color(theme::ink_2()));
             ui.horizontal(|ui| {
                 let mut day = f.end.date();
                 if date_button(ui, "end-day", &mut day) {
@@ -198,14 +198,14 @@ impl Editor {
             }
             ui.end_row();
 
-            ui.label(RichText::new("Location").color(theme::INK_2));
+            ui.label(RichText::new("Location").color(theme::ink_2()));
             ui.add(
                 egui::TextEdit::singleline(&mut self.details.location)
                     .hint_text("Place or address")
                     .desired_width(f32::INFINITY),
             );
             ui.end_row();
-            ui.label(RichText::new("Meeting link").color(theme::INK_2));
+            ui.label(RichText::new("Meeting link").color(theme::ink_2()));
             ui.vertical(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut self.details.meeting_url)
@@ -217,14 +217,14 @@ impl Editor {
                 }
             });
             ui.end_row();
-            ui.label(RichText::new("Show as").color(theme::INK_2));
+            ui.label(RichText::new("Show as").color(theme::ink_2()));
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.details.busy, true, "Busy");
                 ui.selectable_value(&mut self.details.busy, false, "Free");
             });
             ui.end_row();
 
-            ui.label(RichText::new("Repeat").color(theme::INK_2));
+            ui.label(RichText::new("Repeat").color(theme::ink_2()));
             ui.vertical(|ui| {
                 egui::ComboBox::from_id_salt("repeat")
                     .selected_text(f.repeat.label().to_string())
@@ -267,7 +267,7 @@ impl Editor {
             });
             ui.end_row();
 
-            ui.label(RichText::new("Reminder").color(theme::INK_2));
+            ui.label(RichText::new("Reminder").color(theme::ink_2()));
             let current = REMINDERS.iter().find(|r| r.0 == f.reminder_minutes).map_or("Custom", |r| r.1);
             egui::ComboBox::from_id_salt("reminder").selected_text(current).width(200.0).show_ui(ui, |ui| {
                 for (minutes, label) in REMINDERS {
@@ -276,7 +276,7 @@ impl Editor {
             });
             ui.end_row();
 
-            ui.label(RichText::new("Colour").color(theme::INK_2));
+            ui.label(RichText::new("Colour").color(theme::ink_2()));
             ui.horizontal(|ui| {
                 for (name, hex) in theme::SWATCHES {
                     let chosen = f.color.as_deref().unwrap_or(theme::SWATCHES[0].1) == hex;
@@ -284,7 +284,7 @@ impl Editor {
                     let c = theme::hex(Some(hex));
                     ui.painter().circle_filled(rect.center(), 8.0, c);
                     if chosen {
-                        ui.painter().circle_stroke(rect.center(), 10.0, Stroke::new(1.5, theme::INK));
+                        ui.painter().circle_stroke(rect.center(), 10.0, Stroke::new(1.5, theme::ink()));
                     }
                     if r.on_hover_text(name).clicked() {
                         f.color = Some(hex.to_string());
@@ -293,19 +293,19 @@ impl Editor {
             });
             ui.end_row();
 
-            ui.label(RichText::new("Notes").color(theme::INK_2));
+            ui.label(RichText::new("Notes").color(theme::ink_2()));
             ui.add(egui::TextEdit::multiline(&mut f.notes).desired_rows(3).desired_width(f32::INFINITY));
             ui.end_row();
         });
 
         if let Some(e) = &self.error {
             ui.add_space(6.0);
-            ui.label(RichText::new(e).color(theme::DANGER));
+            ui.label(RichText::new(e).color(theme::danger()));
         }
         ui.add_space(14.0);
         let mut out = None;
         ui.horizontal(|ui| {
-            if !self.is_new() && ui.button(RichText::new("Delete").color(theme::DANGER)).clicked() {
+            if !self.is_new() && ui.button(RichText::new("Delete").color(theme::danger())).clicked() {
                 if self.form.is_series() {
                     self.asking = Some(Asking::Delete);
                 } else {
@@ -360,8 +360,8 @@ impl Editor {
 
 pub fn accent_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add(
-        egui::Button::new(RichText::new(text).color(theme::BG).strong())
-            .fill(theme::ACCENT)
+        egui::Button::new(RichText::new(text).color(theme::bg()).strong())
+            .fill(theme::accent())
             .corner_radius(CornerRadius::same(6)),
     )
 }
@@ -389,22 +389,22 @@ pub fn date_button(ui: &mut egui::Ui, salt: &str, day: &mut NaiveDate) -> bool {
             });
             egui::Grid::new(("date-grid", salt)).spacing([2.0, 2.0]).show(ui, |ui| {
                 for name in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] {
-                    ui.label(RichText::new(name).small().color(theme::INK_3));
+                    ui.label(RichText::new(name).small().color(theme::ink_3()));
                 }
                 ui.end_row();
                 for (i, d) in grid::days(View::Month, shown).into_iter().enumerate() {
                     let color = if d == *day {
-                        theme::BG
+                        theme::bg()
                     } else if d.month() == shown.month() {
-                        theme::INK
+                        theme::ink()
                     } else {
-                        theme::INK_3
+                        theme::ink_3()
                     };
                     let mut b = egui::Button::new(RichText::new(d.day().to_string()).color(color))
                         .min_size(egui::vec2(28.0, 24.0))
                         .frame(d == *day);
                     if d == *day {
-                        b = b.fill(theme::ACCENT);
+                        b = b.fill(theme::accent());
                     }
                     if ui.add(b).clicked() {
                         *day = d;

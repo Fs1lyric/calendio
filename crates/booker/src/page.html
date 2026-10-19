@@ -98,7 +98,7 @@
 
     <section id="done" hidden>
       <p class="when" id="done-when"></p>
-      <p class="meta">You're booked. Add it to your own calendar so you don't miss it.</p>
+      <p class="meta">You're booked. Keep your private link to change or cancel this booking.</p><a id="manage-link" rel="noreferrer">Manage your booking</a>
     </section>
 
     <p class="error" id="error" hidden></p>
@@ -218,6 +218,7 @@ $("form").onsubmit = async (ev) => {
       body: JSON.stringify({ ...data, slug, start: new Date(chosen).toISOString().replace(/\.\d{3}Z$/, "Z"), guest_tz: zone }),
     });
     $("done-when").textContent = `${b.title}, ${fmtLong(b.start)}`;
+    if(b.manage_url) $("manage-link").href=b.manage_url;
     show("done");
   } catch (e) {
     $("form-error").textContent = e.message;

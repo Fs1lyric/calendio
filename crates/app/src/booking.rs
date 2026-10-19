@@ -109,17 +109,18 @@ impl Screen {
 
     fn types_list(&mut self, ui: &mut egui::Ui, db: &Db) {
         if self.types.is_empty() {
-            ui.label(RichText::new("Nothing to book yet. Add a type, like a 30 minute call.").color(theme::INK_3));
+            ui.label(RichText::new("Nothing to book yet. Add a type, like a 30 minute call.").color(theme::ink_3()));
         }
         let mut toggled = None;
         for t in &self.types {
             ui.horizontal(|ui| {
                 let (dot, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                let color = if t.active { theme::hex(t.color.as_deref()) } else { theme::INK_3 };
+                let color = if t.active { theme::hex(t.color.as_deref()) } else { theme::ink_3() };
                 ui.painter().circle_filled(dot.center(), 5.0, color);
-                let title = RichText::new(&t.title).strong().color(if t.active { theme::INK } else { theme::INK_3 });
+                let title =
+                    RichText::new(&t.title).strong().color(if t.active { theme::ink() } else { theme::ink_3() });
                 ui.label(title);
-                ui.label(RichText::new(format!("{} min · /{}", t.duration_min, t.slug)).color(theme::INK_3));
+                ui.label(RichText::new(format!("{} min · /{}", t.duration_min, t.slug)).color(theme::ink_3()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Edit").clicked() {
                         self.edit =
@@ -148,7 +149,7 @@ impl Screen {
     }
 
     fn hours_editor(&mut self, ui: &mut egui::Ui, db: &Db, tz: Tz) {
-        ui.label(RichText::new(format!("Times are in {tz}. Guests see them in their own zone.")).color(theme::INK_3));
+        ui.label(RichText::new(format!("Times are in {tz}. Guests see them in their own zone.")).color(theme::ink_3()));
         ui.add_space(4.0);
         egui::Grid::new("hours").num_columns(2).spacing([16.0, 6.0]).show(ui, |ui| {
             for (weekday, name) in WEEKDAYS {
@@ -159,7 +160,7 @@ impl Screen {
                 }
                 ui.horizontal_wrapped(|ui| {
                     if spans.is_empty() {
-                        ui.label(RichText::new("Closed").color(theme::INK_3));
+                        ui.label(RichText::new("Closed").color(theme::ink_3()));
                     }
                     let mut remove = None;
                     for (i, span) in spans.iter_mut().enumerate() {
@@ -196,7 +197,7 @@ impl Screen {
                     remove = Some(i);
                 }
                 if d.date < today {
-                    ui.label(RichText::new("past").color(theme::INK_3));
+                    ui.label(RichText::new("past").color(theme::ink_3()));
                 }
             });
         }
@@ -217,8 +218,8 @@ impl Screen {
                 self.loaded = false;
             }
             match &self.hours_note {
-                Some(Ok(m)) => ui.label(RichText::new(m).color(theme::INK_2)),
-                Some(Err(e)) => ui.label(RichText::new(e).color(theme::DANGER)),
+                Some(Ok(m)) => ui.label(RichText::new(m).color(theme::ink_2())),
+                Some(Err(e)) => ui.label(RichText::new(e).color(theme::danger())),
                 None => ui.label(""),
             };
         });
@@ -233,27 +234,33 @@ impl Screen {
     }
 
     fn bookings_list(&mut self, ui: &mut egui::Ui, db: &Db, tz: Tz) -> Result<Changed, String> {
+        let (queued, failed) = db.email_counts().map_err(|e| e.to_string())?;
+        ui.label(RichText::new(format!("Email: {queued} queued · {failed} failed")).color(theme::ink_3()));
+        if failed > 0 && ui.button("Retry failed email").clicked() {
+            db.retry_failed_email(Utc::now()).map_err(|e| e.to_string())?;
+        }
+
         if self.bookings.is_empty() {
-            ui.label(RichText::new("No bookings coming up.").color(theme::INK_3));
+            ui.label(RichText::new("No bookings coming up.").color(theme::ink_3()));
         }
         let mut cancel = None;
         for b in &self.bookings {
             let cancelled = b.status == "cancelled";
-            let ink = if cancelled { theme::INK_3 } else { theme::INK };
+            let ink = if cancelled { theme::ink_3() } else { theme::ink() };
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(when(&b.start, &b.end, tz)).strong().color(ink));
                 ui.label(RichText::new(format!("{} · {}", b.type_title, b.guest_name)).color(ink));
-                ui.label(RichText::new(&b.guest_email).color(theme::INK_3));
+                ui.label(RichText::new(&b.guest_email).color(theme::ink_3()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if cancelled {
-                        ui.label(RichText::new("cancelled").color(theme::INK_3));
-                    } else if ui.button(RichText::new("Cancel").color(theme::DANGER)).clicked() {
+                        ui.label(RichText::new("cancelled").color(theme::ink_3()));
+                    } else if ui.button(RichText::new("Cancel").color(theme::danger())).clicked() {
                         cancel = Some(b.id);
                     }
                 });
             });
             if !b.guest_note.is_empty() {
-                ui.label(RichText::new(format!("“{}”", b.guest_note)).italics().color(theme::INK_2));
+                ui.label(RichText::new(format!("“{}”", b.guest_note)).italics().color(theme::ink_2()));
             }
             ui.add_space(4.0);
         }
@@ -289,9 +296,9 @@ fn new_type() -> EventTypeInput {
 }
 
 fn card(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::new().fill(theme::SURFACE).corner_radius(CornerRadius::same(10)).inner_margin(16.0).show(ui, |ui| {
+    egui::Frame::new().fill(theme::surface()).corner_radius(CornerRadius::same(10)).inner_margin(16.0).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(RichText::new(title).size(17.0).color(theme::ACCENT));
+        ui.label(RichText::new(title).size(17.0).color(theme::accent()));
         ui.add_space(8.0);
         body(ui);
     });
@@ -331,11 +338,11 @@ fn type_editor(ctx: &egui::Context, edit: &mut TypeEdit) -> Option<TypeOutcome> 
             ui.add_space(10.0);
             egui::Grid::new("type-grid").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
                 fn label(ui: &mut egui::Ui, s: &str) {
-                    ui.label(RichText::new(s).color(theme::INK_2));
+                    ui.label(RichText::new(s).color(theme::ink_2()));
                 }
                 label(ui, "Link");
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("/").color(theme::INK_3));
+                    ui.label(RichText::new("/").color(theme::ink_3()));
                     if ui.add(egui::TextEdit::singleline(&mut t.slug).desired_width(200.0)).changed() {
                         edit.slug_typed = true;
                     }
@@ -382,12 +389,12 @@ fn type_editor(ctx: &egui::Context, edit: &mut TypeEdit) -> Option<TypeOutcome> 
             });
             if let Some(e) = &edit.error {
                 ui.add_space(6.0);
-                ui.label(RichText::new(e).color(theme::DANGER));
+                ui.label(RichText::new(e).color(theme::danger()));
             }
             ui.add_space(14.0);
             ui.horizontal(|ui| {
                 if let Some(id) = edit.id {
-                    if ui.button(RichText::new("Delete").color(theme::DANGER)).clicked() {
+                    if ui.button(RichText::new("Delete").color(theme::danger())).clicked() {
                         out = Some(TypeOutcome::Delete(id));
                     }
                 }

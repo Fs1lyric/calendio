@@ -37,16 +37,16 @@ impl Navigation {
             let cell = ((ui.available_width() - 14.0) / 7.0).floor();
             egui::Grid::new("sidebar-month").num_columns(7).spacing([2.0, 2.0]).show(ui, |ui| {
                 for label in ["M", "T", "W", "T", "F", "S", "S"] {
-                    ui.add_sized([cell, 18.0], egui::Label::new(RichText::new(label).size(10.0).color(theme::INK_3)));
+                    ui.add_sized([cell, 18.0], egui::Label::new(RichText::new(label).size(10.0).color(theme::ink_3())));
                 }
                 ui.end_row();
                 for (index, day) in month_days(self.month).into_iter().enumerate() {
                     let mut label = RichText::new(day.day().to_string()).size(12.0);
                     if day.month() != self.month.month() {
-                        label = label.color(theme::INK_3);
+                        label = label.color(theme::ink_3());
                     }
                     if day == today {
-                        label = label.strong().color(theme::ACCENT);
+                        label = label.strong().color(theme::accent());
                     }
                     if ui
                         .add_sized([cell, 25.0], egui::Button::new(label).selected(day == selected))
@@ -74,12 +74,12 @@ pub fn today_agenda(ui: &mut egui::Ui, items: &[TodayItem], now: NaiveDateTime, 
     let mut selected = None;
     ui.add_space(12.0);
     ui.heading("Today");
-    ui.label(RichText::new(now.format("%A, %-d %B").to_string()).color(theme::INK_2));
-    ui.label(RichText::new(format!("{} events · {tz}", items.len())).small().color(theme::INK_3));
+    ui.label(RichText::new(now.format("%A, %-d %B").to_string()).color(theme::ink_2()));
+    ui.label(RichText::new(format!("{} events · {tz}", items.len())).small().color(theme::ink_3()));
     ui.add_space(12.0);
     if items.is_empty() {
         ui.label("Nothing scheduled today.");
-        ui.label(RichText::new("Pick a time in your calendar to make a plan.").small().color(theme::INK_3));
+        ui.label(RichText::new("Pick a time in your calendar to make a plan.").small().color(theme::ink_3()));
     }
     egui::ScrollArea::vertical().id_salt("today-agenda").show(ui, |ui| {
         for item in items {
@@ -92,13 +92,13 @@ pub fn today_agenda(ui: &mut egui::Ui, items: &[TodayItem], now: NaiveDateTime, 
                 format!("{} – {}", grid::local(&event.start, tz).format("%H:%M"), end.format(end_format))
             };
             egui::Frame::new()
-                .fill(theme::SURFACE)
-                .stroke(egui::Stroke::new(1.0, theme::LINE))
+                .fill(theme::surface())
+                .stroke(egui::Stroke::new(1.0, theme::line()))
                 .corner_radius(8)
                 .inner_margin(10.0)
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(RichText::new(times).small().color(theme::INK_3));
+                    ui.label(RichText::new(times).small().color(theme::ink_3()));
                     if ui
                         .selectable_label(false, RichText::new(&event.title).strong())
                         .on_hover_text(&event.notes)
@@ -107,10 +107,10 @@ pub fn today_agenda(ui: &mut egui::Ui, items: &[TodayItem], now: NaiveDateTime, 
                         selected = Some(event.clone());
                     }
                     if !item.details.location.is_empty() {
-                        ui.label(RichText::new(&item.details.location).color(theme::INK_2));
+                        ui.label(RichText::new(&item.details.location).color(theme::ink_2()));
                     }
                     ui.label(
-                        RichText::new(if item.details.busy { "Busy" } else { "Free" }).small().color(theme::INK_3),
+                        RichText::new(if item.details.busy { "Busy" } else { "Free" }).small().color(theme::ink_3()),
                     );
                     if !item.details.meeting_url.is_empty() {
                         ui.hyperlink_to("Join meeting", &item.details.meeting_url);

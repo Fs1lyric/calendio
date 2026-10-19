@@ -26,6 +26,7 @@ service is deployed by creating this repository.
 ## Available now
 
 - Month, week, day, 30-day agenda, and year overview.
+- Saved System, White, Dark, Catppuccin Mocha, Tokyo Night, Gruvbox, Everforest, Rosé Pine and Nord themes.
 - Multiple calendars with names, colors, visibility, event assignment and safe removal.
 - Quick add: `Design review tomorrow at 14:30 for 45m`, reviewed before saving.
 - Locations, validated meeting links, and Free/Busy status, including busy all-day events.
@@ -38,7 +39,9 @@ service is deployed by creating this repository.
   and occurrence exceptions.
 - Booking event types, weekly availability and date overrides, duration,
   buffers, booking windows, minimum notice, and conflict checks.
-- Public booking page and booking cancellation; local desktop reminders.
+- Private guest rescheduling/cancellation links; local desktop reminders.
+- Queued email confirmations/reminders, Google sync, event undo and SQLite backups;
+  see [setup and limitations](docs/operations.md).
 
 ## Verify
 

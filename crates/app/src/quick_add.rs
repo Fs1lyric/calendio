@@ -146,10 +146,10 @@ impl QuickAdd {
                                 "%a %-d %b %H:%M"
                             })
                         ));
-                        ui.label(RichText::new(tz.to_string()).small().color(theme::INK_3));
+                        ui.label(RichText::new(tz.to_string()).small().color(theme::ink_3()));
                     }
                     Err(message) if !self.text.trim().is_empty() => {
-                        ui.label(RichText::new(message).color(theme::DANGER));
+                        ui.label(RichText::new(message).color(theme::danger()));
                     }
                     _ => {}
                 }
@@ -166,7 +166,7 @@ impl QuickAdd {
                         "Dates: today, tomorrow, Friday, or YYYY-MM-DD. Times: 9am or 14:30. Duration: 30m or 2h.",
                     )
                     .small()
-                    .color(theme::INK_3),
+                    .color(theme::ink_3()),
                 );
             },
         );

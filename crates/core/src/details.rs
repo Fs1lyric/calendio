@@ -72,7 +72,7 @@ impl Db {
         details: &EventDetails,
     ) -> Result<i64> {
         let details = details.clean()?;
-        let tx = self.conn().unchecked_transaction()?;
+        let tx = self.savepoint()?;
         let id = self.create_event_in_calendar(input, calendar_id)?;
         self.set_event_details(id, &details)?;
         tx.commit()?;

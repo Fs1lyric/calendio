@@ -100,7 +100,7 @@ impl Workspace {
                 if ui.checkbox(&mut c.visible, "").changed() {
                     changed = true;
                 }
-                if ui.selectable_label(self.selected == c.id, RichText::new(&c.name).color(theme::INK)).clicked() {
+                if ui.selectable_label(self.selected == c.id, RichText::new(&c.name).color(theme::ink())).clicked() {
                     self.selected = c.id;
                 }
             });
@@ -127,7 +127,7 @@ impl Workspace {
             }
         }
         ui.add_space(12.0);
-        ui.label(RichText::new(format!("{} results", self.results.len())).color(theme::INK_3));
+        ui.label(RichText::new(format!("{} results", self.results.len())).color(theme::ink_3()));
         let mut open = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for event in &self.results {

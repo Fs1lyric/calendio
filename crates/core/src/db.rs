@@ -160,6 +160,21 @@ CREATE TABLE event_details (
     busy INTEGER NOT NULL CHECK (busy IN (0,1))
 );
 "#,
+    r#"
+CREATE TABLE booking_access (booking_id INTEGER PRIMARY KEY REFERENCES bookings(id),token_hash TEXT NOT NULL UNIQUE,version INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE email_jobs (
+ id INTEGER PRIMARY KEY,booking_id INTEGER NOT NULL REFERENCES bookings(id),kind TEXT NOT NULL,version INTEGER NOT NULL,
+ payload TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,
+ next_attempt TEXT NOT NULL,lease TEXT,lease_until TEXT,delivered_at TEXT,
+ UNIQUE(booking_id,kind,version)
+);
+CREATE INDEX email_jobs_due ON email_jobs(status,next_attempt);
+CREATE TABLE edit_history (id INTEGER PRIMARY KEY,label TEXT NOT NULL,event_id INTEGER NOT NULL,before_json TEXT,after_json TEXT,undone INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE google_events (local_uid TEXT PRIMARY KEY,remote_id TEXT NOT NULL UNIQUE,etag TEXT NOT NULL,fingerprint TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0);
+CREATE TRIGGER google_event_deleted BEFORE DELETE ON events BEGIN
+ UPDATE google_events SET deleted=1 WHERE json_extract(local_uid,'$[0]')=OLD.calendar_id AND json_extract(local_uid,'$[1]') IN (SELECT uid FROM event_uids WHERE event_id=OLD.id);
+END;
+"#,
 ];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -462,6 +477,12 @@ impl Db {
             std::fs::create_dir_all(dir).map_err(|e| Error::Invalid(format!("can't create {}: {e}", dir.display())))?;
         }
         let conn = Connection::open(path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|_| Error::Invalid("Cannot protect calendar database permissions".into()))?;
+        }
         conn.pragma_update(None, "journal_mode", "wal")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         Self::init(conn)
@@ -494,6 +515,9 @@ impl Db {
         Ok(Db { conn })
     }
 
+    pub(crate) fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
     pub fn conn(&self) -> &Connection {
         &self.conn
     }
@@ -543,7 +567,7 @@ impl Db {
         let details = details.map(crate::details::EventDetails::clean).transpose()?;
         let e = clean_event(input)?;
         let Some(old) = self.event(id)? else { return invalid(format!("no event {id}")) };
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = self.savepoint()?;
         tx.execute(
             "UPDATE events SET title = ?2, notes = ?3, start = ?4, end = ?5, all_day = ?6, tz = ?7, rrule = ?8,
                     color = ?9, reminder_minutes = ?10, updated_at = ?11, calendar_id = COALESCE(?12, calendar_id)
@@ -872,17 +896,21 @@ impl Db {
     /// Marks a booking cancelled and removes its event from the grid, which
     /// frees the slot for the next guest.
     pub fn cancel_booking(&self, id: i64) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("UPDATE bookings SET status = 'cancelled' WHERE id = ?1", [id])?;
-        tx.execute("DELETE FROM events WHERE booking_id = ?1", [id])?;
-        tx.commit()?;
-        Ok(())
+        self.cancel_booking_notified(id, Utc::now())
     }
 
     /// Busy calendar time, respecting event availability. All-day events are
     /// free unless explicitly marked busy. Bookings always block time and
     /// retain their event type's buffers.
     pub fn busy_between(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<DateRange>> {
+        self.busy_between_excluding(from, to, None)
+    }
+    fn busy_between_excluding(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        excluded: Option<i64>,
+    ) -> Result<Vec<DateRange>> {
         let occ = self.occurrences_between(&stamp(from), &stamp(to))?;
         let mut gaps = self.conn.prepare(
             "SELECT t.buffer_before_min, t.buffer_after_min
@@ -891,6 +919,9 @@ impl Db {
         let availability = self.availability_map()?;
         let mut out = Vec::new();
         for o in &occ {
+            if excluded.is_some_and(|id| o.booking_id == Some(id)) {
+                continue;
+            }
             let Some((busy, zone)) = availability.get(&o.event_id) else {
                 return invalid("Busy event has no availability record");
             };
@@ -918,6 +949,18 @@ impl Db {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<Vec<DateTime<Utc>>> {
+        self.slots_for_excluding(t, organizer_tz, guest_tz, now, (from, to), None)
+    }
+    pub(crate) fn slots_for_excluding(
+        &self,
+        t: &EventType,
+        organizer_tz: Tz,
+        guest_tz: Tz,
+        now: DateTime<Utc>,
+        window: (DateTime<Utc>, DateTime<Utc>),
+        excluded: Option<i64>,
+    ) -> Result<Vec<DateTime<Utc>>> {
+        let (from, to) = window;
         let rules = BookingRules {
             duration_min: t.duration_min,
             buffer_before_min: t.buffer_before_min,
@@ -928,7 +971,7 @@ impl Db {
         // Busy blocks just outside the window still reach in through buffers: this
         // type's, and up to 4 h of another booking's own (the editor's limit).
         let pad = Duration::minutes(t.buffer_before_min.max(t.buffer_after_min) + t.duration_min) + Duration::hours(4);
-        let busy = self.busy_between(from - pad, to + pad)?;
+        let busy = self.busy_between_excluding(from - pad, to + pad, excluded)?;
         Ok(slots::bookable_slots(&self.availability()?, organizer_tz, guest_tz, &rules, &busy, now, from, to))
     }
 
@@ -936,6 +979,14 @@ impl Db {
     /// that the slot is still offered, then adds the booking and its event, so
     /// two guests racing for one slot get one booking and one [`Error::Taken`].
     pub fn book(&self, req: &BookRequest, organizer_tz: Tz, now: DateTime<Utc>) -> Result<Booking> {
+        self.book_with_management(req, organizer_tz, now).map(|r| r.booking)
+    }
+    pub fn book_with_management(
+        &self,
+        req: &BookRequest,
+        organizer_tz: Tz,
+        now: DateTime<Utc>,
+    ) -> Result<crate::booking_flow::BookingReceipt> {
         let (req, start, guest_tz) = clean_request(req)?;
         let tx = rusqlite::Transaction::new_unchecked(&self.conn, rusqlite::TransactionBehavior::Immediate)?;
         let t = match self.event_type_by_slug(&req.slug)? {
@@ -972,8 +1023,7 @@ impl Db {
             reminder_minutes: Some(10),
         })?;
         tx.execute("UPDATE events SET booking_id = ?1 WHERE id = ?2", [id, event])?;
-        tx.commit()?;
-        Ok(Booking {
+        let booking = Booking {
             id,
             event_type_id: t.id,
             type_title: t.title.clone(),
@@ -985,7 +1035,11 @@ impl Db {
             guest_tz: req.guest_tz,
             status: "confirmed".into(),
             created_at,
-        })
+        };
+        let token = self.ensure_booking_token(id)?;
+        self.queue_booking_mail(&booking, &token, "confirmation", now)?;
+        tx.commit()?;
+        Ok(crate::booking_flow::BookingReceipt { booking, token })
     }
 
     /// Reminders whose time falls in `(after, upto]`. All-day events start at
