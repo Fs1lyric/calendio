@@ -1,0 +1,18 @@
+[package]
+name = "calendio"
+description = "Calendio: the desktop calendar"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+calendio-core = { path = "../core" }
+chrono.workspace = true
+chrono-tz.workspace = true
+eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
+iana-time-zone = "0.1"
+
+[[bin]]
+name = "calendio"
+path = "src/main.rs"

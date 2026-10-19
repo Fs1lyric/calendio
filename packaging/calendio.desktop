@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Calendio
+GenericName=Calendar
+Comment=Calendar and booking links
+Exec=calendio
+Icon=calendio
+Terminal=false
+Categories=Office;Calendar;
+Keywords=calendar;events;schedule;booking;
+StartupWMClass=calendio
+Actions=new;month;
+
+[Desktop Action new]
+Name=New event
+Exec=calendio --new
+
+[Desktop Action month]
+Name=Month view
+Exec=calendio --view month

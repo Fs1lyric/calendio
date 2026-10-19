@@ -1,0 +1,13 @@
+[Unit]
+Description=Calendio booking page (localhost; cloudflared publishes it)
+After=network.target
+
+[Service]
+ExecStart=%h/.local/bin/calendio-booker --port 8788
+Restart=on-failure
+RestartSec=5
+MemoryMax=64M
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
