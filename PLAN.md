@@ -56,7 +56,7 @@ light and dark mode at 1180x780 and 390 px wide.
 ## Progress
 
 **Done 2026-11-05.** All seven steps shipped; CI run 42018989778 is green (fmt, clippy
-`-D warnings`, 101 tests, screenshots). The `screenshots` artifact now has 18 PNGs:
+`-D warnings`, 219 workspace tests of which 86 are the app's, screenshots). The `screenshots` artifact now has 18 PNGs:
 the five views and the editor in `apple-light` and `apple-dark` at 1180x780, plus
 week, month and day at 390x780 (`--size 390x780`, with `LC_TIME=en_US.UTF-8` so the
 gutter shows 12-hour times).
