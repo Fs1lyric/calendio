@@ -39,6 +39,8 @@ struct App {
     today: Vec<navigation::TodayItem>,
     recovery: recovery_ui::RecoveryUi,
     theme: theme::Theme,
+    /// 12- or 24-hour times; `main` reads it from the system.
+    clock: clock::Clock,
     tz: Tz,
     view: View,
     anchor: NaiveDate,
@@ -60,6 +62,7 @@ impl App {
         let theme = theme::Theme::parse(&db.setting("theme").ok().flatten().unwrap_or_default());
         App {
             theme,
+            clock: clock::Clock::H12,
             db,
             workspace,
             quick_add: quick_add::QuickAdd::default(),
@@ -541,7 +544,7 @@ impl App {
     fn calendar(&mut self, ui: &mut egui::Ui) {
         let action = egui::CentralPanel::default()
             .show(ui, |ui| {
-                let scene = Scene { occ: &self.occ, tz: self.tz, now: self.now() };
+                let scene = Scene { occ: &self.occ, tz: self.tz, now: self.now(), clock: self.clock };
                 match self.view {
                     View::Month => views::month(ui, &scene, self.anchor),
                     View::Agenda => views::agenda(ui, &scene),
@@ -674,6 +677,7 @@ fn main() -> eframe::Result {
             }
         }
     }
+    let clock = clock::Clock::system();
     let tz: Tz = iana_time_zone::get_timezone().ok().and_then(|z| z.parse().ok()).unwrap_or(Tz::UTC);
     let db = match Db::open(&Db::default_path()) {
         Ok(db) => db,
@@ -689,6 +693,7 @@ fn main() -> eframe::Result {
             theme::apply(&cc.egui_ctx);
             let mut app = App::new(db, tz);
             app.view = view;
+            app.clock = clock;
             app.recovery.open = recovery;
             if let Some(theme) = selected_theme {
                 app.theme = theme;

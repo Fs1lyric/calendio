@@ -12,6 +12,8 @@ scratch=$(mktemp -d)
 export CALENDIO_DB="$scratch/demo.db"
 unset WAYLAND_DISPLAY
 export LIBGL_ALWAYS_SOFTWARE=1
+# A US clock, so the shots show 12-hour times; Calendio reads it from the locale.
+export LC_TIME=en_US.UTF-8
 
 cargo build -q -p calendio
 cargo run -q -p calendio-core --example demo_seed
