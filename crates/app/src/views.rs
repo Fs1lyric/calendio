@@ -258,12 +258,15 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
         let name = ui.ctx().fonts_mut(|f| f.layout_no_wrap(day.format("%a").to_string(), font(13.0), name_color));
         let number_font = if today { theme::semibold(13.0) } else { font(13.0) };
         let number = ui.ctx().fonts_mut(|f| f.layout_no_wrap(day.day().to_string(), number_font, number_color));
+        // Only today's number needs room for its circle.
         let circle = 22.0;
-        let width = name.size().x + 4.0 + circle;
+        let slot = if today { circle } else { number.size().x };
+        let gap = if today { 3.0 } else { 5.0 };
+        let width = name.size().x + gap + slot;
         let left = r.center().x - width / 2.0;
         let p = ui.painter();
         p.galley(Pos2::new(left, r.center().y - name.size().y / 2.0), name, name_color);
-        let c = Pos2::new(left + width - circle / 2.0, r.center().y);
+        let c = Pos2::new(left + width - slot / 2.0, r.center().y);
         if today {
             p.circle_filled(c, circle / 2.0, theme::today());
         }
