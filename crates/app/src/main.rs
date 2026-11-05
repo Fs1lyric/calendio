@@ -1240,3 +1240,67 @@ mod sidebar_tests {
         assert!(band.rect.width() > 150.0, "the tint spans the whole week, not one day");
     }
 }
+
+#[cfg(test)]
+mod keyboard_tests {
+    use super::frames::{one, text_rects, Harness};
+    use super::*;
+
+    fn press(key: Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
+        let event = |pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers };
+        vec![event(true), event(false)]
+    }
+
+    #[test]
+    fn ctrl_1_to_4_switch_day_week_month_year() {
+        let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
+        let harness = Harness::new(1180.0, 780.0);
+        harness.settle(&mut app);
+        for (key, view) in
+            [(Key::Num1, View::Day), (Key::Num2, View::Week), (Key::Num3, View::Month), (Key::Num4, View::Year)]
+        {
+            harness.run(&mut app, press(key, egui::Modifiers::COMMAND));
+            assert_eq!(app.view, view, "Ctrl+{key:?}");
+        }
+        harness.run(&mut app, press(Key::Num1, egui::Modifiers::NONE));
+        assert_eq!(app.view, View::Year, "a bare digit is not a shortcut");
+    }
+
+    #[test]
+    fn t_jumps_to_today_and_the_arrows_page() {
+        let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
+        let today = app.now().date();
+        app.go(View::Week, today + Duration::days(70));
+        let harness = Harness::new(1180.0, 780.0);
+        harness.settle(&mut app);
+        harness.run(&mut app, press(Key::ArrowRight, egui::Modifiers::NONE));
+        assert_eq!(app.anchor, today + Duration::days(77));
+        harness.run(&mut app, press(Key::ArrowLeft, egui::Modifiers::NONE));
+        harness.run(&mut app, press(Key::ArrowLeft, egui::Modifiers::NONE));
+        assert_eq!(app.anchor, today + Duration::days(63));
+        harness.run(&mut app, press(Key::T, egui::Modifiers::NONE));
+        assert_eq!(app.anchor, today);
+        assert_eq!(app.view, View::Week, "T keeps the view");
+    }
+
+    #[test]
+    fn switching_views_keeps_the_toolbar_heading_row_and_sidebar_still() {
+        let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
+        let harness = Harness::new(1180.0, 780.0);
+        let mut first: Option<Vec<egui::Rect>> = None;
+        for view in [View::Week, View::Day, View::Month, View::Year, View::Agenda, View::Week] {
+            app.go(view, app.anchor);
+            let texts = text_rects(&harness.settle(&mut app), harness.screen);
+            let still: Vec<egui::Rect> =
+                ["+", "Day", "Week", "Year", "Search", "…", "Today", "My Calendars"].map(|l| one(&texts, l)).to_vec();
+            match &first {
+                None => first = Some(still),
+                Some(first) => {
+                    for (a, b) in first.iter().zip(&still) {
+                        assert!((a.min - b.min).length() < 0.5, "{view:?} moves the chrome: {a:?} → {b:?}");
+                    }
+                }
+            }
+        }
+    }
+}
