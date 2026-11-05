@@ -574,17 +574,24 @@ impl App {
     }
 }
 
-const USAGE: &str = "usage: calendio [--view month|week|day|agenda|year] [--booking] [--new] [--quick-add] [--theme system|white|dark|catppuccin|tokyo-night|gruvbox|everforest|rose-pine|nord] [--recovery]";
+const USAGE: &str = "usage: calendio [--view month|week|day|agenda|year] [--booking] [--new] [--quick-add] [--theme system|apple-light|apple-dark|white|dark|catppuccin|tokyo-night|gruvbox|everforest|rose-pine|nord] [--recovery] [--size WIDTHxHEIGHT]";
+
+/// `--size 390x780`: the window's starting size, for screenshots of narrow layouts.
+fn parse_size(value: &str) -> Option<[f32; 2]> {
+    let (w, h) = value.split_once('x')?;
+    let (w, h) = (w.parse::<u16>().ok()?, h.parse::<u16>().ok()?);
+    (w >= 360 && h >= 320).then_some([f32::from(w), f32::from(h)])
+}
 
 /// Vsync stays off: on Wayland a vsynced swap waits for a frame callback, and Hyprland
 /// sends none to a window on a hidden workspace, so the 30s repaint would block the
 /// main thread there until the compositor reports Calendio as not responding.
-fn native_options() -> eframe::NativeOptions {
+fn native_options(size: [f32; 2]) -> eframe::NativeOptions {
     eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Calendio")
             .with_app_id("calendio")
-            .with_inner_size([1180.0, 780.0])
+            .with_inner_size(size)
             .with_min_inner_size([360.0, 320.0]),
         glow_options: eframe::egui_glow::GlowConfiguration { vsync: false, ..Default::default() },
         ..Default::default()
@@ -598,6 +605,7 @@ fn main() -> eframe::Result {
     let mut booking = false;
     let mut selected_theme = None;
     let mut recovery = false;
+    let mut size = [1180.0, 780.0];
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -618,6 +626,13 @@ fn main() -> eframe::Result {
             "--quick-add" => quick_entry = true,
             "--booking" => booking = true,
             "--recovery" => recovery = true,
+            "--size" => match args.next().as_deref().and_then(parse_size) {
+                Some(value) => size = value,
+                None => {
+                    eprintln!("{USAGE}");
+                    std::process::exit(2);
+                }
+            },
             "--theme" => {
                 let value = args.next().unwrap_or_default();
                 if !theme::Theme::ALL.iter().any(|t| t.id() == value) {
@@ -642,7 +657,7 @@ fn main() -> eframe::Result {
     };
     eframe::run_native(
         "Calendio",
-        native_options(),
+        native_options(size),
         Box::new(move |cc| {
             theme::apply(&cc.egui_ctx);
             let mut app = App::new(db, tz);
@@ -679,7 +694,16 @@ mod tests {
 
     #[test]
     fn swaps_never_wait_on_the_compositor() {
-        assert!(!super::native_options().glow_options.vsync);
+        assert!(!super::native_options([1180.0, 780.0]).glow_options.vsync);
+    }
+
+    #[test]
+    fn window_size_flag_accepts_supported_sizes_only() {
+        assert_eq!(parse_size("390x780"), Some([390.0, 780.0]));
+        assert_eq!(parse_size("1180x780"), Some([1180.0, 780.0]));
+        for bad in ["300x780", "390x200", "390", "x780", "wide"] {
+            assert_eq!(parse_size(bad), None, "{bad}");
+        }
     }
 }
 

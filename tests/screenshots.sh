@@ -23,22 +23,26 @@ trap 'kill $xvfb 2>/dev/null; rm -rf "$scratch"' EXIT
 export DISPLAY=$display
 sleep 1
 
+# shoot NAME WIDTH ARGS...: a WIDTHx780 window in the top-left corner, cropped to it.
 shoot() {
-    local name=$1
-    shift
-    ./target/debug/calendio "$@" &
+    local name=$1 width=$2
+    shift 2
+    ./target/debug/calendio --size "${width}x780" "$@" &
     local app=$!
     sleep 5
-    import -window root "$out/$name.png"
+    import -window root -crop "${width}x780+0+0" +repage "$out/$name.png"
     kill "$app"
     wait "$app" 2>/dev/null || true
 }
 
-for theme in white dark; do
+for theme in light dark; do
     for view in week month day year agenda; do
-        shoot "$view-$theme" --view "$view" --theme "$theme"
+        shoot "$view-$theme" 1180 --view "$view" --theme "apple-$theme"
     done
-    shoot "editor-$theme" --view week --theme "$theme" --new
+    shoot "editor-$theme" 1180 --view week --theme "apple-$theme" --new
+    for view in week month day; do
+        shoot "$view-$theme-390" 390 --view "$view" --theme "apple-$theme"
+    done
 done
 
 ls "$out"
