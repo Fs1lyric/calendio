@@ -16,7 +16,7 @@ mod workspace;
 
 use calendio_core::db::Db;
 use calendio_core::recur::Occurrence;
-use chrono::{Duration, NaiveDate, NaiveDateTime, Timelike, Utc};
+use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
 use chrono_tz::Tz;
 use editor::{Editor, Outcome};
 use eframe::egui::{self, Key, RichText};
@@ -131,9 +131,13 @@ impl App {
         (self.view, self.anchor, self.stale) = (view, anchor, true);
     }
 
+    /// Opens the occurrence a view reported. An index from before a reload
+    /// is just stale, so reload rather than open the wrong event.
     fn open(&mut self, index: usize) {
-        let occurrence = self.occ[index].clone();
-        self.open_occurrence(&occurrence);
+        match self.occ.get(index).cloned() {
+            Some(occurrence) => self.open_occurrence(&occurrence),
+            None => self.stale = true,
+        }
     }
 
     fn open_occurrence(&mut self, o: &Occurrence) {
@@ -212,7 +216,10 @@ impl App {
 
     /// A drag drop: a single event moves, a series moves just this occurrence.
     fn drop_at(&mut self, index: usize, start: NaiveDateTime) {
-        let o = &self.occ[index];
+        let Some(o) = self.occ.get(index) else {
+            self.stale = true;
+            return;
+        };
         let Ok(Some(e)) = self.db.event(o.event_id) else { return };
         let mut f = Form::open(o, &e, self.tz);
         let length = f.end - f.start;
@@ -388,9 +395,9 @@ impl App {
         // Today: the next full hour. Another day: nine o'clock.
         let now = self.now();
         let start = if self.anchor == now.date() {
-            now.date().and_hms_opt(now.hour(), 0, 0).unwrap() + Duration::hours(1)
+            now.date().and_time(NaiveTime::MIN) + Duration::hours(i64::from(now.hour()) + 1)
         } else {
-            self.anchor.and_hms_opt(9, 0, 0).unwrap()
+            self.anchor.and_time(NaiveTime::MIN) + Duration::hours(9)
         };
         self.editor = Some(self.make_editor(Form::new(start, start + Duration::hours(1), false, self.tz), None));
     }
@@ -412,6 +419,12 @@ impl App {
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Z)) {
             self.undo();
+            return;
+        }
+        // Ctrl+1–4 (⌘ on a Mac): Day, Week, Month, Year, like Apple Calendar.
+        let views = [Key::Num1, Key::Num2, Key::Num3, Key::Num4];
+        if let Some(i) = views.iter().position(|&k| ctx.input(|i| i.modifiers.command && i.key_pressed(k))) {
+            self.go(VIEWS[i].0, self.anchor);
             return;
         }
         let pressed = |k| ctx.input(|i| i.key_pressed(k));
