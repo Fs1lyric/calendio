@@ -1,6 +1,7 @@
 //! The month grid and the week/day time grid. They only paint and report what
 //! the person did; the app decides what that means for the store.
 
+use crate::clock::Clock;
 use crate::grid::{self, View};
 use crate::theme;
 use calendio_core::recur::Occurrence;
@@ -10,6 +11,8 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Id, Pos2, Rect, 
 
 pub const HOUR_PX: f32 = 48.0;
 const GUTTER: f32 = 56.0;
+/// Space above midnight and below 24:00 inside the scrolling hours.
+const PAD: f32 = 12.0;
 const SNAP: i64 = 15;
 
 pub enum Action {
@@ -32,6 +35,7 @@ pub struct Scene<'a> {
     pub occ: &'a [Occurrence],
     pub tz: Tz,
     pub now: NaiveDateTime,
+    pub clock: Clock,
 }
 
 impl Scene<'_> {
@@ -202,25 +206,27 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
     let col_w = (full.width() - GUTTER) / days.len() as f32;
     let col_x = |i: usize| full.left() + GUTTER + col_w * i as f32;
 
-    // Day headers.
-    let head = 46.0;
+    // Day headers: "Mon 19", today's number white in a red circle.
+    let head = 36.0;
     let (head_rect, _) = ui.allocate_exact_size(egui::vec2(full.width(), head), Sense::hover());
     for (i, &day) in days.iter().enumerate() {
         let r = Rect::from_min_size(Pos2::new(col_x(i), head_rect.top()), egui::vec2(col_w, head));
         let today = day == s.now.date();
+        let (name_color, number_color) =
+            if today { (theme::today(), Color32::WHITE) } else { (theme::ink_2(), theme::ink()) };
+        let name = ui.ctx().fonts_mut(|f| f.layout_no_wrap(day.format("%a").to_string(), font(13.0), name_color));
+        let number_font = if today { theme::semibold(13.0) } else { font(13.0) };
+        let number = ui.ctx().fonts_mut(|f| f.layout_no_wrap(day.day().to_string(), number_font, number_color));
+        let circle = 22.0;
+        let width = name.size().x + 4.0 + circle;
+        let left = r.center().x - width / 2.0;
         let p = ui.painter();
-        p.text(
-            Pos2::new(r.center().x, r.top() + 10.0),
-            Align2::CENTER_CENTER,
-            day.format("%a").to_string().to_uppercase(),
-            font(11.0),
-            if today { theme::today() } else { theme::ink_3() },
-        );
-        let c = Pos2::new(r.center().x, r.top() + 30.0);
+        p.galley(Pos2::new(left, r.center().y - name.size().y / 2.0), name, name_color);
+        let c = Pos2::new(left + width - circle / 2.0, r.center().y);
         if today {
-            p.circle_filled(c, 13.0, theme::today());
+            p.circle_filled(c, circle / 2.0, theme::today());
         }
-        p.text(c, Align2::CENTER_CENTER, day.day(), font(17.0), if today { theme::bg() } else { theme::ink() });
+        p.galley(c - number.size() / 2.0, number, number_color);
         if days.len() > 1 && ui.interact(r, Id::new(("head", day)), Sense::click()).clicked() {
             action = Some(Action::Goto(day));
         }
@@ -247,7 +253,7 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
     ui.painter().text(
         Pos2::new(lane_rect.left() + GUTTER - 8.0, lane_rect.top() + 14.0),
         Align2::RIGHT_CENTER,
-        "all day",
+        "all-day",
         font(11.0),
         theme::ink_3(),
     );
@@ -276,20 +282,29 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
         area = area.vertical_scroll_offset(y);
     }
     area.show(ui, |ui| {
-        let (body, _) = ui.allocate_exact_size(egui::vec2(full.width(), 24.0 * HOUR_PX), Sense::hover());
+        // Padding above midnight and below the last hour keeps their labels whole.
+        let (outer, _) = ui.allocate_exact_size(egui::vec2(full.width(), 24.0 * HOUR_PX + 2.0 * PAD), Sense::hover());
+        let body = Rect::from_min_size(outer.min + egui::vec2(0.0, PAD), egui::vec2(full.width(), 24.0 * HOUR_PX));
         let col = |i: usize| Rect::from_min_size(Pos2::new(col_x(i), body.top()), egui::vec2(col_w, body.height()));
         let p = ui.painter().clone();
+        let ppp = ui.ctx().pixels_per_point();
+        let hairline = |y: f32| ((y * ppp).floor() + 0.5) / ppp;
+        let now_y = days
+            .contains(&s.now.date())
+            .then(|| body.top() + (s.now.hour() * 60 + s.now.minute()) as f32 / 60.0 * HOUR_PX);
+        let (left, right) = (body.left() + GUTTER, body.right());
         for h in 0..24 {
             let y = body.top() + h as f32 * HOUR_PX;
-            p.line_segment(
-                [Pos2::new(body.left() + GUTTER, y), Pos2::new(body.right(), y)],
-                Stroke::new(0.5, theme::line()),
-            );
-            if h > 0 {
+            let (line, half) = (hairline(y), hairline(y + HOUR_PX / 2.0));
+            p.line_segment([Pos2::new(left, line), Pos2::new(right, line)], Stroke::new(1.0 / ppp, theme::line()));
+            let faint = theme::line().gamma_multiply(0.45);
+            p.line_segment([Pos2::new(left, half), Pos2::new(right, half)], Stroke::new(1.0 / ppp, faint));
+            let near_now = now_y.is_some_and(|n| (n - y).abs() < 12.0);
+            if h > 0 && !near_now {
                 p.text(
-                    Pos2::new(body.left() + GUTTER - 8.0, y),
+                    Pos2::new(left - 8.0, y),
                     Align2::RIGHT_CENTER,
-                    format!("{h:02}:00"),
+                    s.clock.hour(h as u32),
                     font(11.0),
                     theme::ink_3(),
                 );
@@ -304,7 +319,11 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
         // Empty space: click for an hour, drag to sweep out a span.
         for (i, &day) in days.iter().enumerate() {
             let rect = col(i);
-            p.line_segment([rect.left_top(), rect.left_bottom()], Stroke::new(0.5, theme::line()));
+            let x = ((rect.left() * ppp).floor() + 0.5) / ppp;
+            p.line_segment(
+                [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+                Stroke::new(1.0 / ppp, theme::line()),
+            );
             let r = ui.interact(rect, Id::new(("col", day)), Sense::click_and_drag());
             if r.clicked() {
                 if let Some(pos) = r.interact_pointer_pos() {
@@ -328,7 +347,7 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
             );
             p.rect_filled(ghost, CornerRadius::same(4), theme::soft(theme::accent()));
             p.rect_stroke(ghost, CornerRadius::same(4), Stroke::new(1.0, theme::accent()), StrokeKind::Inside);
-            let label = format!("{} – {}", hm(a), hm(b));
+            let label = s.clock.range(clock_time(a), clock_time(b));
             p.text(ghost.left_top() + egui::vec2(6.0, 4.0), Align2::LEFT_TOP, label, font(11.0), theme::ink());
             if ui.input(|i| i.pointer.any_released()) {
                 let midnight = days[day].and_time(NaiveTime::MIN);
@@ -360,7 +379,7 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
                 let end = grid::local(&o.end, s.tz);
                 let mut lines = vec![(o.title.clone(), 13.0, ink)];
                 if r.height() > 34.0 {
-                    lines.push((format!("{} – {}", start.format("%H:%M"), end.format("%H:%M")), 11.0, theme::ink_2()));
+                    lines.push((s.clock.range(start.time(), end.time()), 11.0, theme::ink_2()));
                 }
                 chip(ui, r, color, &lines, block_notes(&o.notes, r.height()));
                 let resp = with_notes(ui.interact(r, Id::new(("ev", k, day)), Sense::click_and_drag()), &o.notes);
@@ -397,7 +416,7 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
             p.text(
                 ghost.left_top() + egui::vec2(7.0, 3.0),
                 Align2::LEFT_TOP,
-                start.format("%H:%M"),
+                s.clock.short(start.time()),
                 font(11.0),
                 theme::ink(),
             );
@@ -409,19 +428,25 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
             }
         }
 
-        // Now.
-        if let Some(i) = days.iter().position(|&d| d == s.now.date()) {
-            let y = body.top() + (s.now.hour() * 60 + s.now.minute()) as f32 / 60.0 * HOUR_PX;
+        // Now: a red line across today with the time in a red pill in the gutter.
+        if let (Some(i), Some(y)) = (days.iter().position(|&d| d == s.now.date()), now_y) {
             let rect = col(i);
             p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.5, theme::today()));
             p.circle_filled(Pos2::new(rect.left(), y), 4.0, theme::today());
+            let label = s.clock.bare(s.now.time());
+            let text = ui.ctx().fonts_mut(|f| f.layout_no_wrap(label, theme::semibold(11.0), Color32::WHITE));
+            let size = text.size() + egui::vec2(10.0, 4.0);
+            let pill = Rect::from_center_size(Pos2::new(left - 5.0 - size.x / 2.0, y), size);
+            p.rect_filled(pill, CornerRadius::same((size.y / 2.0) as u8), theme::today());
+            p.galley(pill.center() - text.size() / 2.0, text, Color32::WHITE);
         }
     });
     action
 }
 
-fn hm(minutes: i64) -> String {
-    format!("{:02}:{:02}", minutes / 60, minutes % 60)
+/// Minutes after midnight as a time of day; 24:00 reads as midnight.
+fn clock_time(minutes: i64) -> NaiveTime {
+    NaiveTime::MIN + Duration::minutes(minutes)
 }
 
 fn snap_time(t: NaiveDateTime) -> NaiveDateTime {
@@ -451,7 +476,7 @@ pub fn agenda(ui: &mut Ui, s: &Scene) -> Option<Action> {
             let time = if o.all_day {
                 "All day".into()
             } else {
-                format!("{} – {}", start.format("%H:%M"), grid::local(&o.end, s.tz).format("%H:%M"))
+                s.clock.range(start.time(), grid::local(&o.end, s.tz).time())
             };
             if ui
                 .add_sized(
@@ -693,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn hour_labels_follow_the_clock_and_none_is_cut_off() {
+    fn hour_labels_follow_the_clock_and_the_first_one_is_whole() {
         let (shapes, screen) = week_frame(Clock::H12);
         let texts = crate::frames::text_rects(&shapes, screen);
         for label in ["8 AM", "9 AM", "Noon", "1 PM"] {
@@ -703,9 +728,12 @@ mod tests {
         for (clip, shape) in crate::frames::flat(&shapes) {
             if let egui::Shape::Text(text) = &shape {
                 let rect = shape.visual_bounding_rect();
-                if is_hour_label(text.galley.text()) && clip.intersects(rect) {
-                    assert!(clip.contains_rect(rect), "{} is cut off by the scroll edge", text.galley.text());
-                }
+                let straddles_top = rect.top() < clip.top() && rect.bottom() > clip.top();
+                assert!(
+                    !(is_hour_label(text.galley.text()) && straddles_top),
+                    "{} is cut in half at the top of the hours",
+                    text.galley.text()
+                );
             }
         }
         let (shapes, screen) = week_frame(Clock::H24);
