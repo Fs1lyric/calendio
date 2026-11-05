@@ -52,3 +52,29 @@ cut in half.
 
 Done when CI is green and the screenshots match the description above in both
 light and dark mode at 1180x780 and 390 px wide.
+
+## Progress
+
+**Done 2026-11-05.** All seven steps shipped; CI run 42018989778 is green (fmt, clippy
+`-D warnings`, 101 tests, screenshots). The `screenshots` artifact now has 18 PNGs:
+the five views and the editor in `apple-light` and `apple-dark` at 1180x780, plus
+week, month and day at 390x780 (`--size 390x780`, with `LC_TIME=en_US.UTF-8` so the
+gutter shows 12-hour times).
+
+What changed besides the steps above:
+- Agenda moved to the `…` menu (and `A`); Undo is in the menu and on Ctrl+Z; the
+  theme picker, Booking links & hours, Manage calendars and Recovery are in the menu.
+- The clock follows the locale's `T_FMT` (`CALENDIO_CLOCK=12|24` overrides it).
+- Phone-width weeks stack the weekday over the date; phone-width month cells show
+  "● Title" without the time.
+- A stale occurrence index reloads instead of panicking; an incomplete series form
+  returns an error.
+
+## Next (not in this plan)
+
+- Year view: its twelve month cards still use grey day tiles; restyle them like the
+  sidebar mini month.
+- Agenda rows are full-width buttons with centred text; make them Apple-style lists.
+- A multi-day all-day event is a separate pill on each day in the month; join them.
+- The right-hand today panel (windows ≥ 1440 px) and quick add still print 24-hour
+  times.
