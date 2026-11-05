@@ -1112,6 +1112,7 @@ mod toolbar_tests {
 mod sidebar_tests {
     use super::frames::{circles, find, one, rects, text_color, text_rects, Harness};
     use super::*;
+    use chrono::Datelike;
 
     const SIDEBAR: f32 = 240.0;
 
