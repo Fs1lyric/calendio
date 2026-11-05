@@ -2,6 +2,7 @@
 
 mod booking;
 mod chrome;
+mod clock;
 mod editor;
 mod form;
 mod grid;

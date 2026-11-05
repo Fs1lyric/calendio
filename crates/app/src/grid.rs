@@ -286,6 +286,19 @@ mod tests {
     }
 
     #[test]
+    fn three_overlapping_and_nested_events_split_the_column() {
+        let p = |column, columns| Placed { column, columns };
+        // Three that all overlap get a third each.
+        assert_eq!(pack(&[(540, 660), (560, 640), (580, 620)]), [p(0, 3), p(1, 3), p(2, 3)]);
+        // Two short events inside a long one share the second half, one after the other.
+        assert_eq!(pack(&[(540, 720), (570, 600), (630, 660)]), [p(0, 2), p(1, 2), p(1, 2)]);
+        // Input order does not matter.
+        assert_eq!(pack(&[(630, 660), (540, 720), (570, 600)]), [p(1, 2), p(0, 2), p(1, 2)]);
+        // A chain where only neighbours overlap still needs only two columns.
+        assert_eq!(pack(&[(540, 600), (570, 630), (610, 660)]), [p(0, 2), p(1, 2), p(0, 2)]);
+    }
+
+    #[test]
     fn pixels_map_to_snapped_minutes() {
         assert_eq!(minute_at(0.0, 48.0, 15), 0);
         assert_eq!(minute_at(48.0 * 9.5, 48.0, 15), 570);

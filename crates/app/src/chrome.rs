@@ -63,8 +63,10 @@ pub fn icon_button(
 
 /// A borderless button with a text glyph such as `+`, `…`, `‹` or `›`.
 pub fn glyph_button(ui: &mut egui::Ui, glyph: &str, size: f32, hover: &str) -> Response {
+    // An ellipsis sits on the baseline; lift it to the middle like the other glyphs.
+    let lift = if glyph == "…" { size * 0.25 } else { 0.0 };
     icon_button(ui, 28.0, hover, |p, rect, color| {
-        p.text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(size), color);
+        p.text(rect.center() - vec2(0.0, lift), Align2::CENTER_CENTER, glyph, FontId::proportional(size), color);
     })
 }
 

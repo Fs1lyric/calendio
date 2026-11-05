@@ -558,6 +558,7 @@ pub fn year(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::Clock;
 
     #[test]
     fn year_marks_every_busy_day_and_respects_exclusive_midnight_ends() {
@@ -576,7 +577,8 @@ mod tests {
         };
         let occurrences =
             [make("2026-10-19T23:00:00Z", "2026-10-21T00:00:00Z", false), make("2026-10-23", "2026-10-25", true)];
-        let scene = Scene { occ: &occurrences, tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap() };
+        let scene =
+            Scene { occ: &occurrences, tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap(), clock: Clock::H12 };
         let busy = year_busy_days(&scene, day);
         for n in [19, 20, 23, 24] {
             assert!(busy.contains(&NaiveDate::from_ymd_opt(2026, 10, n).unwrap()));
@@ -592,7 +594,8 @@ mod tests {
             let context = egui::Context::default();
             theme::apply(&context);
             let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
-            let scene = Scene { occ: &[], tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap() };
+            let scene =
+                Scene { occ: &[], tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap(), clock: Clock::H12 };
             let mut used = 0.0;
             let mut output = context.run_ui(
                 egui::RawInput {
@@ -616,7 +619,8 @@ mod tests {
                 let context = egui::Context::default();
                 theme::apply(&context);
                 let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
-                let scene = Scene { occ: &[], tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap() };
+                let scene =
+                    Scene { occ: &[], tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap(), clock: Clock::H12 };
                 let mut output = context.run_ui(
                     egui::RawInput {
                         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(width, 780.0))),
@@ -641,6 +645,125 @@ mod tests {
                 output.textures_delta.clear();
             }
         }
+    }
+
+    /// A week (19–25 Oct 2026) with "now" on Wednesday at 10:30, scrolled to 8 AM.
+    fn week_frame(clock: Clock) -> (Vec<egui::epaint::ClippedShape>, Rect) {
+        let context = egui::Context::default();
+        theme::Theme::AppleLight.apply(&context);
+        let monday = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+        let now = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap().and_hms_opt(10, 30, 0).unwrap();
+        let scene = Scene { occ: &[], tz: chrono_tz::UTC, now, clock };
+        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(1180.0, 780.0));
+        let mut shapes = Vec::new();
+        for frame in 0..3 {
+            let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut output = context.run_ui(input, |ui| {
+                let scroll = (frame == 0).then_some(8.0 * HOUR_PX);
+                time_grid(ui, &grid::days(View::Week, monday), &scene, scroll);
+            });
+            output.textures_delta.clear();
+            shapes = output.shapes;
+        }
+        (shapes, screen)
+    }
+
+    fn is_hour_label(text: &str) -> bool {
+        text.ends_with(" AM") || text.ends_with(" PM") || text == "Noon" || text.ends_with(":00")
+    }
+
+    #[test]
+    fn week_header_reads_mon_19_with_today_in_a_red_circle() {
+        let (shapes, screen) = week_frame(Clock::H12);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let head = |label: &str| -> Vec<Rect> {
+            texts.iter().filter(|(t, r)| t == label && r.top() < 50.0).map(|(_, r)| *r).collect()
+        };
+        for (name, number) in [("Mon", "19"), ("Wed", "21"), ("Sun", "25")] {
+            let (n, d) = (head(name), head(number));
+            assert_eq!((n.len(), d.len()), (1, 1), "one {name} {number} header in {texts:?}");
+            assert!((n[0].center().y - d[0].center().y).abs() < 3.0, "{name} {number} is one line");
+            assert!(d[0].left() > n[0].right(), "the number follows the weekday");
+        }
+        assert!(head("MON").is_empty(), "weekdays are not shouted");
+        let today = head("21")[0];
+        let red = crate::frames::circles(&shapes).into_iter().filter(|c| c.fill == theme::today()).collect::<Vec<_>>();
+        assert!(red.iter().any(|c| c.center.distance(today.center()) < 3.0), "today's number sits in a red circle");
+        assert_eq!(crate::frames::text_color(&shapes, "21", today.center()), Some(Color32::WHITE));
+    }
+
+    #[test]
+    fn hour_labels_follow_the_clock_and_none_is_cut_off() {
+        let (shapes, screen) = week_frame(Clock::H12);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        for label in ["8 AM", "9 AM", "Noon", "1 PM"] {
+            assert!(texts.iter().any(|(t, _)| t == label), "{label} is in the gutter: {texts:?}");
+        }
+        assert!(!texts.iter().any(|(t, _)| t == "09:00"));
+        for (clip, shape) in crate::frames::flat(&shapes) {
+            if let egui::Shape::Text(text) = &shape {
+                let rect = shape.visual_bounding_rect();
+                if is_hour_label(text.galley.text()) && clip.intersects(rect) {
+                    assert!(clip.contains_rect(rect), "{} is cut off by the scroll edge", text.galley.text());
+                }
+            }
+        }
+        let (shapes, screen) = week_frame(Clock::H24);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        for label in ["09:00", "13:00"] {
+            assert!(texts.iter().any(|(t, _)| t == label), "{label} in a 24-hour gutter");
+        }
+        assert!(!texts.iter().any(|(t, _)| t == "9 AM"));
+    }
+
+    #[test]
+    fn hour_lines_are_hairlines_and_half_hours_are_fainter() {
+        let (shapes, screen) = week_frame(Clock::H12);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let y = |label: &str| texts.iter().find(|(t, _)| t == label).map(|(_, r)| r.center().y).unwrap();
+        let (nine, ten) = (y("9 AM"), y("10 AM"));
+        let lines: Vec<(f32, Stroke)> = crate::frames::flat(&shapes)
+            .into_iter()
+            .filter_map(|(_, s)| match s {
+                egui::Shape::LineSegment { points: [a, b], stroke }
+                    if (a.y - b.y).abs() < 0.01 && (a.x - b.x).abs() > 500.0 =>
+                {
+                    Some((a.y, stroke))
+                }
+                _ => None,
+            })
+            .collect();
+        let near = |target: f32| lines.iter().find(|(y, _)| (y - target).abs() < 1.0).map(|(_, s)| *s);
+        let hour = near(nine).expect("an hour line at 9 AM");
+        let half = near((nine + ten) / 2.0).expect("a half-hour line at 9:30");
+        assert!(hour.width <= 1.0, "hour lines are hairlines");
+        assert_eq!(hour.color, theme::line());
+        assert!(half.color.a() < hour.color.a(), "half-hour lines are fainter than hour lines");
+    }
+
+    #[test]
+    fn the_now_line_crosses_only_today_with_a_red_time_pill_in_the_gutter() {
+        let (shapes, screen) = week_frame(Clock::H12);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let pill_text = texts.iter().find(|(t, _)| t == "10:30").map(|(_, r)| *r).expect("the time of now");
+        assert!(pill_text.right() <= GUTTER, "the time sits in the gutter");
+        assert_eq!(crate::frames::text_color(&shapes, "10:30", pill_text.center()), Some(Color32::WHITE));
+        let pill = crate::frames::rects(&shapes)
+            .into_iter()
+            .find(|r| r.fill == theme::today() && r.rect.contains(pill_text.center()));
+        assert!(pill.is_some(), "a red pill behind the time");
+        let col_w = (1180.0 - GUTTER) / 7.0;
+        let red: Vec<[Pos2; 2]> = crate::frames::flat(&shapes)
+            .into_iter()
+            .filter_map(|(_, s)| match s {
+                egui::Shape::LineSegment { points, stroke } if stroke.color == theme::today() => Some(points),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(red.len(), 1, "one now line");
+        let [a, b] = red[0];
+        assert!((a.x - (GUTTER + 2.0 * col_w)).abs() < 2.0 && (b.x - (GUTTER + 3.0 * col_w)).abs() < 2.0);
+        assert!((a.y - pill_text.center().y).abs() < 2.0, "the pill sits on the line");
     }
 
     #[test]
