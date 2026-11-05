@@ -811,4 +811,40 @@ mod improvement_tests {
             }
         }
     }
+
+    /// The text of every label whose centre is inside both its clip rect and the window.
+    fn visible_texts(shapes: &[egui::epaint::ClippedShape], screen: egui::Rect) -> Vec<String> {
+        fn walk(shape: &egui::Shape, view: egui::Rect, out: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, view, out)),
+                egui::Shape::Text(text) if view.contains(shape.visual_bounding_rect().center()) => {
+                    out.push(text.galley.text().to_owned())
+                }
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for clipped in shapes {
+            walk(&clipped.shape, clipped.clip_rect.intersect(screen), &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn editor_save_and_cancel_stay_on_screen_in_the_smallest_window() {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 320.0));
+        let ctx = egui::Context::default();
+        theme::apply(&ctx);
+        let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
+        app.new_event();
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            let output =
+                ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| app.show(ui));
+            texts = visible_texts(&output.shapes, screen);
+        }
+        for label in ["Save", "Cancel"] {
+            assert!(texts.iter().any(|t| t == label), "{label} is off screen in a 360x320 window; visible: {texts:?}");
+        }
+    }
 }
