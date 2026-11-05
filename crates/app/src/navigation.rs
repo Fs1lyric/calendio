@@ -46,7 +46,7 @@ impl Navigation {
                         label = label.color(theme::ink_3());
                     }
                     if day == today {
-                        label = label.strong().color(theme::accent());
+                        label = label.strong().color(theme::today());
                     }
                     if ui
                         .add_sized([cell, 25.0], egui::Button::new(label).selected(day == selected))

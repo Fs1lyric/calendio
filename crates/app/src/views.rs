@@ -127,7 +127,7 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
         let num_center = Pos2::new(cell.left() + 16.0, cell.top() + 14.0);
         let num_rect = Rect::from_center_size(num_center, egui::vec2(24.0, 22.0));
         if today {
-            painter.circle_filled(num_center, 11.0, theme::accent());
+            painter.circle_filled(num_center, 11.0, theme::today());
         }
         let num_color = if today {
             theme::bg()
@@ -214,11 +214,11 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
             Align2::CENTER_CENTER,
             day.format("%a").to_string().to_uppercase(),
             font(11.0),
-            if today { theme::accent() } else { theme::ink_3() },
+            if today { theme::today() } else { theme::ink_3() },
         );
         let c = Pos2::new(r.center().x, r.top() + 30.0);
         if today {
-            p.circle_filled(c, 13.0, theme::accent());
+            p.circle_filled(c, 13.0, theme::today());
         }
         p.text(c, Align2::CENTER_CENTER, day.day(), font(17.0), if today { theme::bg() } else { theme::ink() });
         if days.len() > 1 && ui.interact(r, Id::new(("head", day)), Sense::click()).clicked() {
@@ -413,8 +413,8 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
         if let Some(i) = days.iter().position(|&d| d == s.now.date()) {
             let y = body.top() + (s.now.hour() * 60 + s.now.minute()) as f32 / 60.0 * HOUR_PX;
             let rect = col(i);
-            p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.5, theme::pink()));
-            p.circle_filled(Pos2::new(rect.left(), y), 4.0, theme::pink());
+            p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.5, theme::today()));
+            p.circle_filled(Pos2::new(rect.left(), y), 4.0, theme::today());
         }
     });
     action
@@ -614,6 +614,7 @@ mod tests {
         for width in [360.0, 800.0, 1180.0] {
             for view in [grid::View::Year, grid::View::Agenda, grid::View::Month, grid::View::Week, grid::View::Day] {
                 let context = egui::Context::default();
+                theme::apply(&context);
                 let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
                 let scene = Scene { occ: &[], tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap() };
                 let mut output = context.run_ui(

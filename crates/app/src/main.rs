@@ -220,7 +220,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             if !narrow {
-                ui.label(RichText::new("Calendio").strong().color(theme::accent()).size(16.0));
+                ui.label(RichText::new("Calendio").font(theme::semibold(16.0)).color(theme::accent()));
                 ui.add_space(12.0);
             }
             if self.booking.is_some() {
@@ -235,7 +235,8 @@ impl App {
                 if ui.button("›").clicked() {
                     self.go(self.view, grid::step(self.view, self.anchor, 1));
                 }
-                let title = RichText::new(grid::title(self.view, self.anchor)).size(if narrow { 15.0 } else { 18.0 });
+                let size = if narrow { 15.0 } else { 18.0 };
+                let title = RichText::new(grid::title(self.view, self.anchor)).font(theme::bold(size));
                 ui.add(egui::Label::new(title).truncate());
             }
             if !narrow {

@@ -1,11 +1,15 @@
-//! Calendio: paper surfaces, ink typography and a blue action accent.
+//! Calendio's look: Apple Calendar's white canvas, hairline grid and system red
+//! by default, set in Inter, with the older palettes kept as alternatives.
 
-use eframe::egui::{self, Color32, CornerRadius, Stroke, Visuals};
+use eframe::egui::{self, Color32, CornerRadius, FontFamily, FontId, Stroke, Visuals};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Theme {
+    /// Apple light or dark, whichever the system asks for.
     #[default]
     System,
+    AppleLight,
+    AppleDark,
     White,
     Dark,
     Catppuccin,
@@ -27,12 +31,16 @@ struct Palette {
     ink_3: Color32,
     accent: Color32,
     danger: Color32,
+    /// Today's date circle and the now line.
+    today: Color32,
     dark: bool,
 }
 
 impl Theme {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 11] = [
         Self::System,
+        Self::AppleLight,
+        Self::AppleDark,
         Self::White,
         Self::Dark,
         Self::Catppuccin,
@@ -45,6 +53,8 @@ impl Theme {
     pub fn id(self) -> &'static str {
         match self {
             Self::System => "system",
+            Self::AppleLight => "apple-light",
+            Self::AppleDark => "apple-dark",
             Self::White => "white",
             Self::Dark => "dark",
             Self::Catppuccin => "catppuccin",
@@ -58,6 +68,8 @@ impl Theme {
     pub fn label(self) -> &'static str {
         match self {
             Self::System => "System",
+            Self::AppleLight => "Apple Light",
+            Self::AppleDark => "Apple Dark",
             Self::White => "White",
             Self::Dark => "Dark",
             Self::Catppuccin => "Catppuccin Mocha",
@@ -73,7 +85,13 @@ impl Theme {
     }
     fn palette(self, system_dark: bool) -> Palette {
         let colors = match self {
-            Self::System => return if system_dark { Self::Dark } else { Self::White }.palette(false),
+            Self::System => return if system_dark { Self::AppleDark } else { Self::AppleLight }.palette(false),
+            Self::AppleLight => {
+                [0xffffff, 0xf5f5f7, 0xebebef, 0xe5e5e5, 0x1d1d1f, 0x48484a, 0x636366, 0x0062cc, 0xd70015]
+            }
+            Self::AppleDark => {
+                [0x1e1e1e, 0x262626, 0x323232, 0x3a3a3a, 0xf5f5f7, 0xd1d1d6, 0xa1a1a6, 0x4ea6ff, 0xff6961]
+            }
             Self::White => [0xfafbf9, 0xffffff, 0xeef1f0, 0xd6ddda, 0x202c32, 0x42535d, 0x566871, 0x2457b2, 0xa72e49],
             Self::Dark => [0x16191f, 0x1e222a, 0x272d37, 0x424b5a, 0xe8edf4, 0xc7d0dd, 0xa5b2c4, 0x8ab4f8, 0xff9bad],
             Self::Catppuccin => {
@@ -105,7 +123,12 @@ impl Theme {
             ink_3: c(6),
             accent: c(7),
             danger: c(8),
-            dark: self != Self::White,
+            today: match self {
+                Self::AppleLight => Color32::from_rgb(0xff, 0x3b, 0x30),
+                Self::AppleDark => Color32::from_rgb(0xff, 0x45, 0x3a),
+                _ => c(7),
+            },
+            dark: !matches!(self, Self::White | Self::AppleLight),
         }
     }
     pub fn apply(self, ctx: &egui::Context) {
@@ -114,7 +137,7 @@ impl Theme {
         apply(ctx);
     }
 }
-thread_local! { static PALETTE: std::cell::Cell<Palette> = std::cell::Cell::new(Theme::White.palette(false)); }
+thread_local! { static PALETTE: std::cell::Cell<Palette> = std::cell::Cell::new(Theme::AppleLight.palette(false)); }
 macro_rules! color {
     ($name:ident,$field:ident) => {
         pub fn $name() -> Color32 {
@@ -131,8 +154,42 @@ color!(ink_2, ink_2);
 color!(ink_3, ink_3);
 color!(accent, accent);
 color!(danger, danger);
-pub fn pink() -> Color32 {
-    danger()
+color!(today, today);
+
+/// Inter (OFL, `assets/Inter-LICENSE.txt`) at three weights. egui has no font
+/// weights, so SemiBold and Bold are named families; the default fonts stay
+/// behind each one for symbols and emoji Inter lacks.
+fn font_definitions() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::default();
+    let fallbacks = fonts.families[&FontFamily::Proportional].clone();
+    for (name, data, family) in [
+        ("Inter", &include_bytes!("../assets/Inter-Regular.ttf")[..], FontFamily::Proportional),
+        ("Inter SemiBold", &include_bytes!("../assets/Inter-SemiBold.ttf")[..], FontFamily::Name("semibold".into())),
+        ("Inter Bold", &include_bytes!("../assets/Inter-Bold.ttf")[..], FontFamily::Name("bold".into())),
+    ] {
+        fonts.font_data.insert(name.into(), std::sync::Arc::new(egui::FontData::from_static(data)));
+        let mut list = vec![name.to_owned()];
+        list.extend(fallbacks.iter().cloned());
+        fonts.families.insert(family, list);
+    }
+    fonts
+}
+
+pub fn semibold(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name("semibold".into()))
+}
+
+pub fn bold(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name("bold".into()))
+}
+
+/// Loads the fonts once per context; they take effect from the next frame.
+fn install_fonts(ctx: &egui::Context) {
+    let id = egui::Id::new("calendio-fonts");
+    if ctx.data(|d| d.get_temp::<bool>(id).is_none()) {
+        ctx.set_fonts(font_definitions());
+        ctx.data_mut(|d| d.insert_temp(id, true));
+    }
 }
 
 /// Event colours, stored on the event as `#rrggbb`.
@@ -157,6 +214,7 @@ pub fn soft(c: Color32) -> Color32 {
 }
 
 pub fn apply(ctx: &egui::Context) {
+    install_fonts(ctx);
     let mut v = if PALETTE.with(|p| p.get().dark) { Visuals::dark() } else { Visuals::light() };
     v.panel_fill = bg();
     v.window_fill = surface();
