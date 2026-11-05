@@ -349,10 +349,11 @@ mod tests {
     fn inter_is_the_ui_font_with_semibold_and_bold_weights() {
         let ctx = egui::Context::default();
         Theme::AppleLight.apply(&ctx);
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.label(egui::RichText::new("November").font(bold(28.0)));
             ui.label(egui::RichText::new("Standup").font(semibold(12.0)));
         });
+        output.textures_delta.clear();
         let families = ctx.fonts(|f| f.definitions().families.clone());
         assert_eq!(families[&egui::FontFamily::Proportional][0], "Inter");
         assert_eq!(families[&egui::FontFamily::Name("semibold".into())][0], "Inter SemiBold");
