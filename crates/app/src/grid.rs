@@ -222,13 +222,21 @@ mod tests {
         assert_eq!(step(View::Day, d("2026-10-31"), 1), d("2026-11-01"));
     }
 
+    /// Apple Calendar's heading: the month in bold, then the year in regular weight.
     #[test]
-    fn titles_name_the_period() {
-        assert_eq!(title(View::Month, d("2026-10-15")), "October 2026");
-        assert_eq!(title(View::Week, d("2026-10-15")), "12 – 18 Oct 2026");
-        assert_eq!(title(View::Week, d("2026-09-30")), "28 Sep – 4 Oct 2026");
-        assert_eq!(title(View::Week, d("2026-12-30")), "28 Dec 2026 – 3 Jan 2027");
-        assert_eq!(title(View::Day, d("2026-10-15")), "Thursday 15 October 2026");
+    fn headings_name_the_month_in_bold_and_the_year_after_it() {
+        let h = |view, day| {
+            let (bold, light) = heading(view, d(day));
+            (bold, light)
+        };
+        let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
+        assert_eq!(h(View::Month, "2026-10-15"), pair("October", "2026"));
+        assert_eq!(h(View::Week, "2026-10-15"), pair("October", "2026"));
+        assert_eq!(h(View::Week, "2026-09-30"), pair("Sep – Oct", "2026"));
+        assert_eq!(h(View::Week, "2026-12-30"), pair("Dec 2026 – Jan", "2027"));
+        assert_eq!(h(View::Day, "2026-10-15"), pair("15 October", "2026"));
+        assert_eq!(h(View::Year, "2026-10-15"), pair("2026", ""));
+        assert_eq!(h(View::Agenda, "2026-10-15"), pair("Agenda", "from 15 Oct 2026"));
     }
 
     #[test]
@@ -297,7 +305,7 @@ mod agenda_tests {
         assert_eq!(visible.len(), 30);
         assert_eq!(visible[0], anchor);
         assert_eq!(step(View::Agenda, anchor, 1), anchor + Duration::days(30));
-        assert!(title(View::Agenda, anchor).contains("Agenda"));
+        assert_eq!(heading(View::Agenda, anchor).0, "Agenda");
     }
 }
 
@@ -311,6 +319,6 @@ mod year_tests {
         assert_eq!(days.len(), 366);
         assert_eq!(days[0], NaiveDate::from_ymd_opt(2024, 1, 1).unwrap());
         assert_eq!(step(View::Year, leap, 1), NaiveDate::from_ymd_opt(2025, 2, 28).unwrap());
-        assert_eq!(title(View::Year, leap), "2024");
+        assert_eq!(heading(View::Year, leap), ("2024".to_owned(), String::new()));
     }
 }

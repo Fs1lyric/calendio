@@ -874,3 +874,133 @@ mod improvement_tests {
         }
     }
 }
+
+/// Shared by the layout tests: runs a few frames and reads back where text landed.
+#[cfg(test)]
+mod frames {
+    use super::*;
+
+    /// Every visible label and where it is: centre inside both its clip rect and the window.
+    pub fn text_rects(shapes: &[egui::epaint::ClippedShape], screen: egui::Rect) -> Vec<(String, egui::Rect)> {
+        fn walk(shape: &egui::Shape, view: egui::Rect, out: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, view, out)),
+                egui::Shape::Text(text) => {
+                    let rect = shape.visual_bounding_rect();
+                    if view.contains(rect.center()) {
+                        out.push((text.galley.text().to_owned(), rect));
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for clipped in shapes {
+            walk(&clipped.shape, clipped.clip_rect.intersect(screen), &mut out);
+        }
+        out
+    }
+
+    pub fn render(app: &mut App, width: f32, height: f32) -> Vec<(String, egui::Rect)> {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height));
+        let ctx = egui::Context::default();
+        theme::apply(&ctx);
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            let mut output =
+                ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| app.show(ui));
+            output.textures_delta.clear();
+            texts = text_rects(&output.shapes, screen);
+        }
+        texts
+    }
+
+    pub fn find(texts: &[(String, egui::Rect)], label: &str) -> Vec<egui::Rect> {
+        texts.iter().filter(|(t, _)| t == label).map(|(_, r)| *r).collect()
+    }
+
+    pub fn one(texts: &[(String, egui::Rect)], label: &str) -> egui::Rect {
+        let found = find(texts, label);
+        assert_eq!(found.len(), 1, "expected one {label:?}, found {found:?}; visible: {texts:?}");
+        found[0]
+    }
+}
+
+#[cfg(test)]
+mod toolbar_tests {
+    use super::frames::{find, one, render};
+    use super::*;
+
+    fn november_app() -> App {
+        let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
+        app.go(View::Month, NaiveDate::from_ymd_opt(2026, 11, 5).unwrap());
+        app
+    }
+
+    #[test]
+    fn toolbar_is_one_row_with_the_views_centred_and_the_month_title_below() {
+        let mut app = november_app();
+        let texts = render(&mut app, 1180.0, 780.0);
+        let week = one(&texts, "Week");
+        for label in ["Day", "Month", "Year"] {
+            let rect = one(&texts, label);
+            assert!((rect.center().y - week.center().y).abs() < 2.0, "{label} is off the toolbar row");
+        }
+        let centre = (one(&texts, "Day").left() + one(&texts, "Year").right()) / 2.0;
+        assert!((centre - 590.0).abs() < 80.0, "the view switch is centred, not at {centre}");
+        let plus = one(&texts, "+");
+        assert!(plus.left() < 120.0 && (plus.center().y - week.center().y).abs() < 4.0, "+ sits on the left");
+        let search = one(&texts, "Search");
+        assert!(search.left() > 860.0 && (search.center().y - week.center().y).abs() < 4.0, "search on the right");
+        let more = one(&texts, "…");
+        assert!(more.left() > 860.0 && (more.center().y - week.center().y).abs() < 4.0, "… menu on the right");
+
+        let month = one(&texts, "November");
+        let year = one(&texts, "2026");
+        assert!(month.top() > week.bottom() && month.left() < 300.0, "the title sits under the toolbar on the left");
+        assert!(month.height() > 2.0 * week.height() - 6.0, "the title is large");
+        assert!(year.left() > month.right() && (year.center().y - month.center().y).abs() < 4.0);
+        let today = one(&texts, "Today");
+        assert!(today.left() > 900.0 && (today.center().y - month.center().y).abs() < 14.0, "Today on the title row");
+        for arrow in ["‹", "›"] {
+            assert!((one(&texts, arrow).center().y - today.center().y).abs() < 4.0, "{arrow} beside Today");
+        }
+
+        for gone in [
+            "Import / export",
+            "Quick add",
+            "Undo",
+            "Recovery & connections",
+            "Search events",
+            "Calendars",
+            "Booking",
+            "+ New",
+            "Create event",
+            "Agenda",
+            "Calendio",
+        ] {
+            assert!(find(&texts, gone).is_empty(), "{gone:?} should be off the toolbar");
+        }
+        assert!(texts.iter().all(|(t, _)| !t.starts_with("Theme")), "the theme picker moves to the … menu");
+        for rect in find(&texts, "Personal") {
+            assert!(rect.left() < 232.0, "only the sidebar names the Personal calendar");
+        }
+    }
+
+    #[test]
+    fn toolbar_still_fits_one_row_in_a_phone_width_window() {
+        for width in [360.0, 390.0] {
+            let mut app = november_app();
+            let texts = render(&mut app, width, 780.0);
+            let week = one(&texts, "Week");
+            for label in ["Day", "Month", "Year", "+", "…"] {
+                let rect = one(&texts, label);
+                assert!((rect.center().y - week.center().y).abs() < 4.0, "{label} wraps at {width} px");
+                assert!(rect.right() <= width, "{label} is cut off at {width} px");
+            }
+            for label in ["November", "Today", "‹", "›"] {
+                assert!(one(&texts, label).right() <= width, "{label} is cut off at {width} px");
+            }
+        }
+    }
+}
