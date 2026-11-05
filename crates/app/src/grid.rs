@@ -55,22 +55,25 @@ pub fn step(view: View, anchor: NaiveDate, by: i32) -> NaiveDate {
     }
 }
 
-pub fn title(view: View, anchor: NaiveDate) -> String {
+/// The heading over the calendar as (bold, regular), Apple style: "November"
+/// then "2026". A week across two months names both.
+pub fn heading(view: View, anchor: NaiveDate) -> (String, String) {
+    let year = |d: NaiveDate| d.format("%Y").to_string();
     match view {
-        View::Month => anchor.format("%B %Y").to_string(),
-        View::Year => anchor.format("%Y").to_string(),
-        View::Agenda => format!("Agenda · {}", anchor.format("%-d %b %Y")),
-        View::Day => anchor.format("%A %-d %B %Y").to_string(),
+        View::Month => (anchor.format("%B").to_string(), year(anchor)),
+        View::Year => (year(anchor), String::new()),
+        View::Day => (anchor.format("%-d %B").to_string(), year(anchor)),
+        View::Agenda => ("Agenda".into(), anchor.format("from %-d %b %Y").to_string()),
         View::Week => {
             let (a, b) = (week_start(anchor), week_start(anchor) + Duration::days(6));
-            let left = if a.year() != b.year() {
-                "%-d %b %Y"
+            let bold = if a.year() != b.year() {
+                format!("{} – {}", a.format("%b %Y"), b.format("%b"))
             } else if a.month() != b.month() {
-                "%-d %b"
+                format!("{} – {}", a.format("%b"), b.format("%b"))
             } else {
-                "%-d"
+                a.format("%B").to_string()
             };
-            format!("{} – {}", a.format(left), b.format("%-d %b %Y"))
+            (bold, year(b))
         }
     }
 }
@@ -225,10 +228,7 @@ mod tests {
     /// Apple Calendar's heading: the month in bold, then the year in regular weight.
     #[test]
     fn headings_name_the_month_in_bold_and_the_year_after_it() {
-        let h = |view, day| {
-            let (bold, light) = heading(view, d(day));
-            (bold, light)
-        };
+        let h = |view, day| heading(view, d(day));
         let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
         assert_eq!(h(View::Month, "2026-10-15"), pair("October", "2026"));
         assert_eq!(h(View::Week, "2026-10-15"), pair("October", "2026"));

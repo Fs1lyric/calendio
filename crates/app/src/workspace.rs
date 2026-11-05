@@ -62,27 +62,46 @@ impl Workspace {
         self.search_open = true;
         self.focus_search = true;
     }
-    pub fn toolbar(&mut self, ui: &mut egui::Ui) -> bool {
-        let mut quick = false;
-        ui.horizontal_wrapped(|ui| {
-            quick = ui.button("Quick add").on_hover_text("Q · Write an event in one line").clicked();
-            if ui.selectable_label(self.search_open, "Search events").on_hover_text("Ctrl+K").clicked() {
-                self.search_open = !self.search_open;
-                self.focus_search = self.search_open;
-            }
-            if ui.button("Calendars").clicked() {
-                self.drafts = self.calendars.clone();
-                self.manage_open = true;
-                self.message.clear();
-            }
-            if ui.button("Import / export").clicked() {
-                self.transfer_open = true;
-                self.message.clear();
-            }
-            ui.separator();
-            self.calendar_picker(ui, "new-event-calendar");
-        });
-        quick
+    pub fn open_manage(&mut self) {
+        self.drafts = self.calendars.clone();
+        self.manage_open = true;
+        self.message.clear();
+    }
+    pub fn open_transfer(&mut self) {
+        self.transfer_open = true;
+        self.message.clear();
+    }
+    /// The toolbar's search field. Typing shows results in place of the
+    /// calendar; Escape clears it and goes back.
+    pub fn search_field(&mut self, ui: &mut egui::Ui, db: &Db, width: f32) {
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut self.query)
+                .hint_text("Search")
+                .margin(egui::Margin { left: 26, right: 8, top: 4, bottom: 4 })
+                .min_size(egui::vec2(width, crate::chrome::CONTROL_H))
+                .desired_width(width - 34.0),
+        );
+        let lens = egui::Rect::from_min_size(response.rect.min, egui::vec2(24.0, response.rect.height()));
+        crate::chrome::magnifier_glyph(ui.painter(), lens, theme::ink_3());
+        if self.focus_search {
+            response.request_focus();
+            self.focus_search = false;
+        }
+        if response.changed() {
+            self.search_open = !self.query.trim().is_empty();
+            self.find(db);
+        }
+        if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.query.clear();
+            self.search_open = false;
+            response.surrender_focus();
+        }
+    }
+    fn find(&mut self, db: &Db) {
+        match db.search_events(&self.query) {
+            Ok(results) => self.results = results,
+            Err(e) => self.message = e.to_string(),
+        }
     }
     pub fn calendar_picker(&mut self, ui: &mut egui::Ui, id: &str) {
         let name = self.calendars.iter().find(|c| c.id == self.selected).map(|c| c.name.as_str()).unwrap_or("Personal");
@@ -110,20 +129,21 @@ impl Workspace {
         }
         Ok(changed)
     }
-    pub fn search(&mut self, ui: &mut egui::Ui, db: &Db, tz: Tz) -> Option<(Form, Event)> {
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut self.query)
-                .hint_text("Search titles, notes, and locations across every calendar")
-                .desired_width(f32::INFINITY),
-        );
-        if self.focus_search {
-            response.request_focus();
-            self.focus_search = false;
-        }
-        if response.changed() {
-            match db.search_events(&self.query) {
-                Ok(results) => self.results = results,
-                Err(e) => self.message = e.to_string(),
+    /// Search results in place of the calendar. Narrow windows have no
+    /// toolbar field, so `with_field` puts one above the results.
+    pub fn search(&mut self, ui: &mut egui::Ui, db: &Db, tz: Tz, with_field: bool) -> Option<(Form, Event)> {
+        if with_field {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut self.query)
+                    .hint_text("Search titles, notes, and locations across every calendar")
+                    .desired_width(f32::INFINITY),
+            );
+            if self.focus_search {
+                response.request_focus();
+                self.focus_search = false;
+            }
+            if response.changed() {
+                self.find(db);
             }
         }
         ui.add_space(12.0);
@@ -354,8 +374,8 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        workspace.toolbar(ui);
-                        workspace.search(ui, &db, chrono_tz::UTC);
+                        workspace.search_field(ui, &db, 180.0);
+                        workspace.search(ui, &db, chrono_tz::UTC, width < 700.0);
                         workspace.dialogs(ui.ctx(), &db, chrono_tz::UTC);
                     },
                 );

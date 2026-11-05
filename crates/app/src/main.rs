@@ -1,6 +1,7 @@
 //! Calendio, the desktop calendar.
 
 mod booking;
+mod chrome;
 mod editor;
 mod form;
 mod grid;
@@ -16,11 +17,18 @@ use calendio_core::db::Db;
 use calendio_core::recur::Occurrence;
 use chrono::{Duration, NaiveDate, NaiveDateTime, Timelike, Utc};
 use chrono_tz::Tz;
-use editor::{accent_button, Editor, Outcome};
+use editor::{Editor, Outcome};
 use eframe::egui::{self, Key, RichText};
 use form::{Form, Save, Scope};
 use grid::View;
 use views::{Action, Scene};
+
+/// The toolbar's view switch, in Apple Calendar's order. Agenda lives in the `…` menu.
+const VIEWS: [(View, &str); 4] =
+    [(View::Day, "Day"), (View::Week, "Week"), (View::Month, "Month"), (View::Year, "Year")];
+
+/// Below this width the toolbar's search field becomes a button.
+const NARROW: f32 = 700.0;
 
 struct App {
     db: Db,
@@ -37,6 +45,8 @@ struct App {
     stale: bool,
     loaded_at: std::time::Instant,
     scroll_to: Option<f32>,
+    /// The sidebar toggle's choice; until it is used the sidebar shows in wide windows.
+    sidebar: Option<bool>,
     editor: Option<Editor>,
     /// The booking screen replaces the calendar while it is open.
     booking: Option<booking::Screen>,
@@ -62,6 +72,7 @@ impl App {
             stale: true,
             loaded_at: std::time::Instant::now(),
             scroll_to: Some(8.0 * views::HOUR_PX),
+            sidebar: None,
             editor: None,
             booking: None,
             error: None,
@@ -213,88 +224,151 @@ impl App {
         }
     }
 
-    /// Navigation and the period on the left, view switch and "New" on the
-    /// right. Narrow windows put the two halves on separate rows.
-    fn top_bar(&mut self, ui: &mut egui::Ui) {
-        let narrow = ui.available_width() < 760.0;
-        ui.horizontal(|ui| {
-            ui.add_space(4.0);
-            if !narrow {
-                ui.label(RichText::new("Calendio").font(theme::semibold(16.0)).color(theme::accent()));
-                ui.add_space(12.0);
+    /// Row one: sidebar toggle and `+` on the left, the view switch centred,
+    /// search and the `…` menu on the right. Row two: the big heading on the
+    /// left and `‹ Today ›` on the right.
+    fn toolbar(&mut self, ui: &mut egui::Ui, sidebar_shown: bool) {
+        let width = ui.available_width();
+        let narrow = width < NARROW;
+        let (row, _) = ui.allocate_exact_size(egui::vec2(width, chrome::CONTROL_H), egui::Sense::hover());
+        let child = |ui: &mut egui::Ui, rect: egui::Rect, layout: egui::Layout| {
+            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout))
+        };
+
+        let mut left = child(ui, row, egui::Layout::left_to_right(egui::Align::Center));
+        left.spacing_mut().item_spacing.x = 2.0;
+        if chrome::icon_button(&mut left, 30.0, "Show or hide the sidebar", chrome::sidebar_glyph).clicked() {
+            self.sidebar = Some(!sidebar_shown);
+        }
+        if chrome::glyph_button(&mut left, "+", 20.0, "New event (N)").clicked() {
+            self.new_event();
+        }
+
+        let labels = VIEWS.map(|(_, name)| name);
+        // Roomy segments, squeezed between the side buttons in a phone-width window.
+        let room = (width - 150.0) / 4.0;
+        let segment = chrome::segment_width(ui, &labels, 16.0).min(room.max(chrome::segment_width(ui, &labels, 3.0)));
+        let selected = if self.booking.is_some() { None } else { VIEWS.iter().position(|(v, _)| *v == self.view) };
+        let switch = egui::Rect::from_center_size(row.center(), egui::vec2(segment * 4.0 + 4.0, chrome::CONTROL_H));
+        let mut centre = child(ui, switch, egui::Layout::left_to_right(egui::Align::Center));
+        if let Some(i) = chrome::segmented(&mut centre, &labels, selected, segment) {
+            self.go(VIEWS[i].0, self.anchor);
+        }
+
+        let mut right = child(ui, row, egui::Layout::right_to_left(egui::Align::Center));
+        right.spacing_mut().item_spacing.x = 6.0;
+        let more = chrome::glyph_button(&mut right, "…", 18.0, "More");
+        self.more_menu(&more);
+        if narrow {
+            if chrome::icon_button(&mut right, 28.0, "Search (Ctrl+K)", chrome::magnifier_glyph).clicked() {
+                self.workspace.open_search();
+                self.booking = None;
             }
-            if self.booking.is_some() {
-                ui.label(RichText::new("Booking").size(if narrow { 15.0 } else { 18.0 }));
-            } else if ui.button("Today").clicked() {
+        } else {
+            let field = if width < 1000.0 { 150.0 } else { 200.0 };
+            self.workspace.search_field(&mut right, &self.db, field);
+            if self.workspace.search_open {
+                self.booking = None;
+            }
+        }
+
+        ui.add_space(12.0);
+        let size = if narrow { 22.0 } else { 26.0 };
+        let (row, _) = ui.allocate_exact_size(egui::vec2(width, size * 1.25), egui::Sense::hover());
+        let mut nav = child(ui, row, egui::Layout::right_to_left(egui::Align::Center));
+        nav.spacing_mut().item_spacing.x = 2.0;
+        let (bold, regular) = if self.booking.is_some() {
+            ("Booking".to_owned(), "links & hours".to_owned())
+        } else {
+            if chrome::glyph_button(&mut nav, "›", 20.0, "Next (→)").clicked() {
+                self.go(self.view, grid::step(self.view, self.anchor, 1));
+            }
+            if chrome::pill_button(&mut nav, "Today", "Today (T)").clicked() {
                 self.go(self.view, self.now().date());
             }
-            if self.booking.is_none() {
-                if ui.button("‹").clicked() {
-                    self.go(self.view, grid::step(self.view, self.anchor, -1));
-                }
-                if ui.button("›").clicked() {
-                    self.go(self.view, grid::step(self.view, self.anchor, 1));
-                }
-                let size = if narrow { 15.0 } else { 18.0 };
-                let title = RichText::new(grid::title(self.view, self.anchor)).font(theme::bold(size));
-                ui.add(egui::Label::new(title).truncate());
+            if chrome::glyph_button(&mut nav, "‹", 20.0, "Previous (←)").clicked() {
+                self.go(self.view, grid::step(self.view, self.anchor, -1));
             }
-            if !narrow {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.switcher(ui));
-            }
-        });
-        if narrow {
-            ui.horizontal(|ui| {
-                ui.add_space(4.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.switcher(ui));
-            });
+            grid::heading(self.view, self.anchor)
+        };
+        let used = nav.min_rect().width();
+        let title = egui::Rect::from_min_max(row.min, egui::pos2(row.right() - used - 12.0, row.bottom()));
+        let mut title = child(ui, title, egui::Layout::left_to_right(egui::Align::Center));
+        title.spacing_mut().item_spacing.x = 7.0;
+        title.add(egui::Label::new(RichText::new(bold).font(theme::bold(size)).color(theme::ink())).truncate());
+        if !regular.is_empty() {
+            let regular = RichText::new(regular).font(egui::FontId::proportional(size)).color(theme::ink_2());
+            title.add(egui::Label::new(regular).truncate());
         }
     }
 
-    /// Right to left: "New", Booking, then Month / Week / Day.
-    fn switcher(&mut self, ui: &mut egui::Ui) {
-        if accent_button(ui, "+ New").clicked() {
-            self.new_event();
-        }
-        ui.add_space(8.0);
-        if ui.selectable_label(self.booking.is_some(), "Booking").clicked() {
-            self.open_booking();
-        }
-        ui.add_space(8.0);
-        if ui.available_width() < 600.0 {
-            let label = match self.view {
-                View::Month => "Month",
-                View::Week => "Week",
-                View::Day => "Day",
-                View::Agenda => "Agenda",
-                View::Year => "Year",
+    /// Everything that left the toolbar: quick add, agenda, booking, calendar
+    /// files, undo, theme and recovery.
+    fn more_menu(&mut self, button: &egui::Response) {
+        let ctx = button.ctx.clone();
+        egui::Popup::menu(button).show(|ui| {
+            ui.set_min_width(230.0);
+            ui.spacing_mut().interact_size.y = 24.0;
+            ui.spacing_mut().button_padding = egui::vec2(8.0, 4.0);
+            let item = |ui: &mut egui::Ui, label: &str, shortcut: &str| {
+                ui.add(egui::Button::new(label).shortcut_text(shortcut).frame_when_inactive(false)).clicked()
             };
-            egui::ComboBox::from_id_salt("calendar-view").selected_text(label).show_ui(ui, |ui| {
-                for (view, name) in [
-                    (View::Month, "Month"),
-                    (View::Week, "Week"),
-                    (View::Day, "Day"),
-                    (View::Agenda, "Agenda"),
-                    (View::Year, "Year"),
-                ] {
-                    if ui.selectable_label(self.view == view && self.booking.is_none(), name).clicked() {
-                        self.go(view, self.anchor);
+            if item(ui, "New event", "N") {
+                self.new_event();
+            }
+            if item(ui, "Quick add…", "Q") {
+                self.quick_add.open();
+            }
+            ui.separator();
+            if item(ui, "Agenda", "A") {
+                self.go(View::Agenda, self.anchor);
+            }
+            if item(ui, "Booking links & hours", "B") {
+                self.open_booking();
+            }
+            ui.separator();
+            if item(ui, "Manage calendars…", "") {
+                self.workspace.open_manage();
+            }
+            if item(ui, "Import / export…", "") {
+                self.workspace.open_transfer();
+            }
+            ui.separator();
+            let label = self.db.undo_label().ok().flatten();
+            let undo = egui::Button::new(label.as_ref().map_or("Undo".into(), |l| format!("Undo {l}")))
+                .shortcut_text("Ctrl+Z")
+                .frame_when_inactive(false);
+            if ui.add_enabled(label.is_some(), undo).clicked() {
+                self.undo();
+            }
+            ui.menu_button("Theme", |ui| {
+                for theme in theme::Theme::ALL {
+                    if ui.selectable_label(self.theme == theme, theme.label()).clicked() {
+                        self.set_theme(theme, &ctx);
+                        ui.close();
                     }
                 }
             });
-            return;
-        }
-        for (v, name) in [
-            (View::Year, "Year"),
-            (View::Agenda, "Agenda"),
-            (View::Day, "Day"),
-            (View::Week, "Week"),
-            (View::Month, "Month"),
-        ] {
-            if ui.selectable_label(self.view == v && self.booking.is_none(), name).clicked() {
-                self.go(v, self.anchor);
+            if item(ui, "Recovery & connections…", "") {
+                self.recovery.open = true;
             }
+        });
+    }
+
+    fn undo(&mut self) {
+        match self.db.undo() {
+            Ok(_) => self.stale = true,
+            Err(error) => self.error = Some(error.to_string()),
         }
+    }
+
+    fn set_theme(&mut self, theme: theme::Theme, ctx: &egui::Context) {
+        self.theme = theme;
+        if let Err(error) = self.db.set_setting("theme", theme.id()) {
+            self.error = Some(error.to_string());
+        }
+        theme.apply(ctx);
+        ctx.request_repaint();
     }
 
     fn open_booking(&mut self) {
@@ -328,6 +402,10 @@ impl App {
         if self.editor.is_some() || ctx.memory(|m| m.focused().is_some()) {
             return;
         }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Z)) {
+            self.undo();
+            return;
+        }
         let pressed = |k| ctx.input(|i| i.key_pressed(k));
         if pressed(Key::T) {
             self.go(self.view, self.now().date());
@@ -340,6 +418,9 @@ impl App {
         }
         if pressed(Key::D) {
             self.go(View::Day, self.anchor);
+        }
+        if pressed(Key::A) {
+            self.go(View::Agenda, self.anchor);
         }
         if pressed(Key::N) {
             self.new_event();
@@ -367,9 +448,12 @@ impl App {
         self.reload();
         ctx.request_repaint_after(std::time::Duration::from_secs(30));
 
-        egui::Panel::top("top").show(ui, |ui| {
-            ui.add_space(8.0);
-            self.top_bar(ui);
+        let window = ui.available_width();
+        let sidebar_shown = self.sidebar.unwrap_or(window >= 940.0);
+        let bar =
+            egui::Frame::new().fill(theme::bg()).inner_margin(egui::Margin { left: 10, right: 10, top: 8, bottom: 8 });
+        egui::Panel::top("top").frame(bar).show(ui, |ui| {
+            self.toolbar(ui, sidebar_shown);
             if let Some(e) = self.error.clone() {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(e).color(theme::danger()));
@@ -378,71 +462,18 @@ impl App {
                     }
                 });
             }
-            ui.add_space(6.0);
-            if self.workspace.toolbar(ui) {
-                self.quick_add.open();
-            }
-            ui.horizontal_wrapped(|ui| {
-                let label = self.db.undo_label().ok().flatten();
-                if ui
-                    .add_enabled(label.is_some(), egui::Button::new("Undo"))
-                    .on_hover_text(label.unwrap_or_else(|| "Nothing to undo".into()))
-                    .clicked()
-                {
-                    match self.db.undo() {
-                        Ok(_) => self.stale = true,
-                        Err(error) => self.error = Some(error.to_string()),
-                    }
-                }
-                let previous = self.theme;
-                egui::ComboBox::from_id_salt("theme-picker")
-                    .selected_text(format!("Theme: {}", self.theme.label()))
-                    .show_ui(ui, |ui| {
-                        for theme in theme::Theme::ALL {
-                            ui.selectable_value(&mut self.theme, theme, theme.label());
-                        }
-                    });
-                if self.theme != previous {
-                    if let Err(error) = self.db.set_setting("theme", self.theme.id()) {
-                        self.error = Some(error.to_string());
-                    }
-                    self.theme.apply(&ctx);
-                    ctx.request_repaint();
-                }
-                if ui.button("Recovery & connections").clicked() {
-                    self.recovery.open = true;
-                }
-            });
-            ui.add_space(6.0);
         });
         if self.workspace.search_open {
             self.booking = None;
         }
         let show_today = ui.available_width() >= 1440.0;
-        if ui.available_width() >= 940.0 {
+        if sidebar_shown {
             egui::Panel::left("navigation").resizable(false).default_size(232.0).show(ui, |ui| {
                 egui::ScrollArea::vertical().id_salt("sidebar-scroll").show(ui, |ui| {
                     ui.add_space(20.0);
                     let today = self.now().date();
                     if let Some(day) = self.navigation.show(ui, self.anchor, today) {
                         self.go(if self.view == View::Year { View::Day } else { self.view }, day);
-                    }
-                    ui.add_space(20.0);
-                    if ui.add_sized([180.0, 38.0], egui::Button::new("Create event")).clicked() {
-                        self.new_event();
-                    }
-                    ui.add_space(20.0);
-                    ui.label(RichText::new("CALENDAR").size(11.0).color(theme::ink_3()));
-                    for (view, name) in [
-                        (View::Year, "Year"),
-                        (View::Agenda, "Agenda"),
-                        (View::Day, "Day"),
-                        (View::Week, "Week"),
-                        (View::Month, "Month"),
-                    ] {
-                        if ui.selectable_label(self.booking.is_none() && self.view == view, name).clicked() {
-                            self.go(view, self.anchor);
-                        }
                     }
                     ui.add_space(20.0);
                     ui.label(RichText::new("SCHEDULING").size(11.0).color(theme::ink_3()));
@@ -484,7 +515,9 @@ impl App {
                 Err(e) => self.error = Some(e),
             }
         } else if self.workspace.search_open {
-            let found = egui::CentralPanel::default().show(ui, |ui| self.workspace.search(ui, &self.db, self.tz)).inner;
+            let narrow = window < NARROW;
+            let found =
+                egui::CentralPanel::default().show(ui, |ui| self.workspace.search(ui, &self.db, self.tz, narrow)).inner;
             if let Some((form, event)) = found {
                 self.editor = Some(self.make_editor(form, Some(event)));
             }
