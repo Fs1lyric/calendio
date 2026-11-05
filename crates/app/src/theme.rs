@@ -169,6 +169,11 @@ pub fn raised() -> Color32 {
     }
 }
 
+/// The selected week in the mini month: the sidebar tinted towards the accent.
+pub fn tint() -> Color32 {
+    surface().lerp_to_gamma(accent(), 0.14)
+}
+
 /// A faint tint under a hovered borderless control.
 pub fn hover() -> Color32 {
     ink().gamma_multiply(0.07)

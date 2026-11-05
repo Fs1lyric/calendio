@@ -111,20 +111,41 @@ impl Workspace {
             }
         });
     }
+    /// "My Calendars": the round checkbox in each calendar's colour shows or
+    /// hides it, and clicking the name makes it the calendar new events go to.
     pub fn sidebar(&mut self, ui: &mut egui::Ui, db: &Db) -> Result<bool, String> {
+        use egui::{pos2, vec2, Align2, FontId, Sense, Stroke};
+        ui.label(RichText::new("My Calendars").font(theme::semibold(12.0)).color(theme::ink_3()));
+        ui.add_space(2.0);
         let mut changed = false;
         for c in &mut self.calendars {
-            let was_visible = c.visible;
-            ui.horizontal(|ui| {
-                if ui.checkbox(&mut c.visible, "").changed() {
-                    changed = true;
-                }
-                if ui.selectable_label(self.selected == c.id, RichText::new(&c.name).color(theme::ink())).clicked() {
-                    self.selected = c.id;
-                }
-            });
-            if was_visible != c.visible {
+            let colour = theme::hex(Some(&c.color));
+            let (row, name) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
+            let centre = pos2(row.left() + 13.0, row.center().y);
+            let dot = ui.interact(
+                egui::Rect::from_center_size(centre, vec2(22.0, 22.0)),
+                ui.id().with(("calendar-visible", c.id)),
+                Sense::click(),
+            );
+            let p = ui.painter();
+            if self.selected == c.id {
+                p.rect_filled(row, egui::CornerRadius::same(6), theme::hover());
+            }
+            if c.visible {
+                p.circle_filled(centre, 7.0, colour);
+                let tick = [centre + vec2(-3.4, 0.2), centre + vec2(-1.0, 2.6), centre + vec2(3.4, -2.4)];
+                p.add(egui::Shape::line(tick.to_vec(), Stroke::new(1.6, egui::Color32::WHITE)));
+            } else {
+                p.circle_stroke(centre, 6.3, Stroke::new(1.5, colour));
+            }
+            let text = pos2(row.left() + 30.0, row.center().y);
+            p.text(text, Align2::LEFT_CENTER, &c.name, FontId::proportional(13.0), theme::ink());
+            if dot.on_hover_text(if c.visible { "Hide" } else { "Show" }).clicked() {
+                c.visible = !c.visible;
                 db.update_calendar(c.id, &c.name, &c.color, c.visible).map_err(|e| e.to_string())?;
+                changed = true;
+            } else if name.on_hover_text("New events go here").clicked() {
+                self.selected = c.id;
             }
         }
         Ok(changed)
