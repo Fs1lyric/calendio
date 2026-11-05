@@ -258,6 +258,21 @@ impl Form {
 }
 
 #[cfg(test)]
+mod robustness_tests {
+    use super::*;
+
+    #[test]
+    fn a_series_form_without_an_event_is_an_error_not_a_crash() {
+        let start = NaiveDateTime::parse_from_str("2026-10-19 09:00", "%Y-%m-%d %H:%M").unwrap();
+        let mut form = Form::new(start, start + chrono::Duration::hours(1), false, chrono_tz::UTC);
+        form.title = "Standup".into();
+        form.original_start = Some("2026-10-19T09:00:00Z".into());
+        form.event_id = None;
+        assert!(form.save(Scope::One, None).is_err());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

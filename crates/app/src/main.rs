@@ -736,6 +736,17 @@ mod tests {
     }
 
     #[test]
+    fn a_stale_occurrence_index_reloads_instead_of_crashing() {
+        let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
+        app.reload();
+        app.open(3);
+        let start = app.now();
+        app.drop_at(3, start);
+        assert!(app.editor.is_none());
+        assert!(app.stale, "the calendar reloads");
+    }
+
+    #[test]
     fn swaps_never_wait_on_the_compositor() {
         assert!(!super::native_options([1180.0, 780.0]).glow_options.vsync);
     }

@@ -176,6 +176,35 @@ impl QuickAdd {
 }
 
 #[cfg(test)]
+mod robustness_tests {
+    use super::*;
+
+    #[test]
+    fn odd_one_liners_are_errors_not_crashes() {
+        let now = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap().and_hms_opt(10, 0, 0).unwrap();
+        for input in [
+            "",
+            "for",
+            "for 30m",
+            "x for",
+            "at",
+            "at at",
+            "today at 9",
+            "x at",
+            "x at 25:00",
+            "x for 99999999999999h",
+            "x 2026-02-30 at 9am",
+            "x 2026-xx-01 at 9am",
+            "ééééééééé- at 9am",
+            "next friday at 9am",
+            "x at 9am for -5m",
+        ] {
+            let _ = parse(input, now, chrono_tz::UTC);
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use chrono::NaiveDate;
