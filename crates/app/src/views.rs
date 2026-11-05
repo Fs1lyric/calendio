@@ -920,6 +920,108 @@ mod tests {
         assert_eq!(crate::frames::text_color(&shapes, "Planning", title.center()), Some(Color32::WHITE));
     }
 
+    fn event(id: i64, title: &str, start: &str, end: &str, colour: &str) -> Occurrence {
+        Occurrence {
+            event_id: id,
+            title: title.into(),
+            notes: String::new(),
+            start: start.into(),
+            end: end.into(),
+            all_day: !start.contains('T'),
+            color: Some(colour.into()),
+            reminder_minutes: None,
+            booking_id: None,
+            original_start: None,
+        }
+    }
+
+    /// October 2026 at 1180x780, "now" on Wednesday 21 at 10:30.
+    fn month_frame(occ: &[Occurrence]) -> (Vec<egui::epaint::ClippedShape>, Rect) {
+        let context = egui::Context::default();
+        theme::Theme::AppleLight.apply(&context);
+        let now = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap().and_hms_opt(10, 30, 0).unwrap();
+        let scene = Scene { occ, tz: chrono_tz::UTC, now, clock: Clock::H12, selected: None };
+        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(1180.0, 780.0));
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut output = context.run_ui(input, |ui| {
+                month(ui, &scene, now.date());
+            });
+            output.textures_delta.clear();
+            shapes = output.shapes;
+        }
+        (shapes, screen)
+    }
+
+    #[test]
+    fn month_cells_put_the_date_top_right_and_list_timed_events_as_dot_time_title() {
+        let blue = Color32::from_rgb(0x24, 0x57, 0xb2);
+        let occ = [event(1, "Planning", "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", "#2457b2")];
+        let (shapes, screen) = month_frame(&occ);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let column = 1180.0 / 7.0;
+        // 22 Oct is a Thursday: the fourth column.
+        let (left, right) = (3.0 * column, 4.0 * column);
+        let line = crate::frames::one(&texts, "9 AM Planning");
+        assert!(line.left() > left && line.left() < left + 30.0, "the event line starts at the cell's left");
+        let dot = crate::frames::circles(&shapes)
+            .into_iter()
+            .find(|c| c.fill == blue && c.center.x < line.left() && (c.center.y - line.center().y).abs() < 3.0);
+        assert!(dot.is_some(), "a dot in the calendar colour leads the line");
+        let date = texts
+            .iter()
+            .find(|(t, r)| t == "22" && r.center().x > left && r.center().x < right)
+            .map(|(_, r)| *r)
+            .expect("the date");
+        assert!(date.right() > right - 18.0 && date.right() < right, "the date sits at the cell's right");
+        assert!(date.bottom() < line.top(), "the date is above the events");
+
+        let today = texts
+            .iter()
+            .find(|(t, r)| t == "21" && r.center().x > 2.0 * column && r.center().x < left)
+            .map(|(_, r)| *r)
+            .expect("today's date");
+        assert!(today.right() > left - 24.0, "today's date is top-right too");
+        let red = crate::frames::circles(&shapes).into_iter().find(|c| c.fill == theme::today());
+        assert!(red.is_some_and(|c| c.center.distance(today.center()) < 3.0), "today is in a red circle");
+        assert_eq!(crate::frames::text_color(&shapes, "21", today.center()), Some(Color32::WHITE));
+        assert!(crate::frames::find(&texts, "Mon").len() == 1, "weekday names head the columns");
+    }
+
+    #[test]
+    fn month_all_day_events_are_solid_pills() {
+        let purple = Color32::from_rgb(0xaf, 0x52, 0xde);
+        let (shapes, screen) = month_frame(&[event(2, "Trip", "2026-10-23", "2026-10-25", "#af52de")]);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let trips = crate::frames::find(&texts, "Trip");
+        assert_eq!(trips.len(), 2, "the trip shows on both of its days");
+        for trip in trips {
+            let pill =
+                crate::frames::rects(&shapes).into_iter().find(|r| r.fill == purple && r.rect.contains(trip.center()));
+            assert!(pill.is_some(), "a solid pill behind the all-day title");
+            let ink = crate::frames::text_color(&shapes, "Trip", trip.center());
+            assert_eq!(ink, Some(theme::event_colors(purple, true).title));
+        }
+    }
+
+    #[test]
+    fn a_full_month_cell_ends_with_n_more() {
+        let occ: Vec<Occurrence> = (0..6)
+            .map(|i| {
+                let start = format!("2026-10-27T{:02}:00:00Z", 8 + i);
+                let end = format!("2026-10-27T{:02}:30:00Z", 8 + i);
+                event(10 + i, &format!("Busy {i}"), &start, &end, "#ff9500")
+            })
+            .collect();
+        let (shapes, screen) = month_frame(&occ);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let shown = texts.iter().filter(|(t, _)| t.contains(" Busy ")).count();
+        assert!((1..6).contains(&shown), "{shown} of 6 events fit");
+        let more = format!("+{} more", 6 - shown);
+        crate::frames::one(&texts, &more);
+    }
+
     #[test]
     fn an_hour_block_shows_its_notes() {
         assert_eq!(block_notes("Ice wash face", HOUR_PX - 2.0), Some("Ice wash face"));
