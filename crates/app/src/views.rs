@@ -992,11 +992,15 @@ mod tests {
 
     /// October 2026 at 1180x780, "now" on Wednesday 21 at 10:30.
     fn month_frame(occ: &[Occurrence]) -> (Vec<egui::epaint::ClippedShape>, Rect) {
+        month_at(occ, 1180.0)
+    }
+
+    fn month_at(occ: &[Occurrence], width: f32) -> (Vec<egui::epaint::ClippedShape>, Rect) {
         let context = egui::Context::default();
         theme::Theme::AppleLight.apply(&context);
         let now = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap().and_hms_opt(10, 30, 0).unwrap();
         let scene = Scene { occ, tz: chrono_tz::UTC, now, clock: Clock::H12, selected: None };
-        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(1180.0, 780.0));
+        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(width, 780.0));
         let mut shapes = Vec::new();
         for _ in 0..3 {
             let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
@@ -1042,6 +1046,15 @@ mod tests {
         assert!(red.is_some_and(|c| c.center.distance(today.center()) < 3.0), "today is in a red circle");
         assert_eq!(crate::frames::text_color(&shapes, "21", today.center()), Some(Color32::WHITE));
         assert!(crate::frames::find(&texts, "Mon").len() == 1, "weekday names head the columns");
+    }
+
+    #[test]
+    fn phone_width_month_cells_drop_the_time_so_the_title_shows() {
+        let occ = [event(1, "Planning", "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", "#2457b2")];
+        let (shapes, screen) = month_at(&occ, 390.0);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        crate::frames::one(&texts, "Planning");
+        assert!(crate::frames::find(&texts, "9 AM Planning").is_empty());
     }
 
     #[test]
