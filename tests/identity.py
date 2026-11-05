@@ -14,7 +14,10 @@ class Identity(unittest.TestCase):
     def test_install_does_not_remove_old_app(self):
         source = (ROOT / 'install.sh').read_text()
         self.assertNotIn('rm -f', source)
-        self.assertIn('target/release/calendio', source)
+        # Calendio's own binaries, from a local release build or the CI artifact.
+        self.assertIn('from=target/release', source)
+        self.assertIn('--name calendio-linux-x86_64', source)
+        self.assertIn('"$from/calendio" "$HOME/.local/bin/calendio"', source)
         self.assertIn('calendio-booker.service', source)
 
     def test_binary_identity(self):

@@ -35,3 +35,20 @@ jobs:
         with:
           name: screenshots
           path: screenshots/
+
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - run: cargo build --release -p calendio -p calendio-booker
+      - uses: actions/upload-artifact@v4
+        with:
+          name: calendio-linux-x86_64
+          path: |
+            target/release/calendio
+            target/release/calendio-booker
