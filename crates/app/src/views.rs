@@ -36,9 +36,15 @@ pub struct Scene<'a> {
     pub tz: Tz,
     pub now: NaiveDateTime,
     pub clock: Clock,
+    /// The occurrence open in the editor, as (event id, start stamp).
+    pub selected: Option<(i64, String)>,
 }
 
 impl Scene<'_> {
+    fn is_selected(&self, o: &Occurrence) -> bool {
+        self.selected.as_ref().is_some_and(|(id, start)| *id == o.event_id && *start == o.start)
+    }
+
     fn local_start(&self, o: &Occurrence) -> NaiveDateTime {
         if o.all_day {
             o.start.parse::<NaiveDate>().unwrap_or_default().and_time(NaiveTime::MIN)
@@ -54,6 +60,41 @@ fn at(day: NaiveDate, hour: u32) -> NaiveDateTime {
 
 fn font(size: f32) -> FontId {
     FontId::proportional(size)
+}
+
+/// An Apple Calendar event block: the tinted fill, a 3 px bar in the calendar
+/// colour, a semibold title in a darker shade of it with the time underneath,
+/// and `notes` wrapped below. The selected block is solid with white text; a
+/// block being dragged is faded.
+struct Block<'a> {
+    title: &'a str,
+    time: Option<String>,
+    notes: Option<&'a str>,
+    selected: bool,
+    faded: bool,
+}
+
+fn event_block(ui: &Ui, rect: Rect, color: Color32, b: Block) {
+    let c = theme::event_colors(color, b.selected);
+    let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    p.rect_filled(rect, CornerRadius::same(5), c.fill);
+    let bar = CornerRadius { nw: 5, sw: 5, ne: 0, se: 0 };
+    p.rect_filled(Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height())), bar, c.bar);
+    let ink = if b.faded { c.title.gamma_multiply(0.55) } else { c.title };
+    let x = rect.left() + 8.0;
+    let title = p.layout_no_wrap(b.title.to_owned(), theme::semibold(12.0), ink);
+    let mut y = rect.top() + 3.0 + title.size().y;
+    p.galley(Pos2::new(x, rect.top() + 3.0), title, ink);
+    if let Some(time) = b.time {
+        let time = p.layout_no_wrap(time, font(11.0), ink);
+        let height = time.size().y;
+        p.galley(Pos2::new(x, y), time, ink);
+        y += height;
+    }
+    if let Some(notes) = b.notes {
+        let galley = p.layout(notes.to_owned(), font(11.0), ink, (rect.width() - 11.0).max(1.0));
+        p.galley(Pos2::new(x, y + 2.0), galley, ink);
+    }
 }
 
 /// A rounded event chip with a coloured edge and clipped text. `notes` go under
@@ -270,7 +311,8 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
             Pos2::new(col_x(b as usize) - 2.0, lane_rect.top() + 2.0 + (lane.column + 1) as f32 * lane_h),
         );
         let o = &s.occ[k];
-        chip(ui, r, theme::hex(o.color.as_deref()), &[(o.title.clone(), 12.0, theme::ink())], None);
+        let block = Block { title: &o.title, time: None, notes: None, selected: s.is_selected(o), faded: false };
+        event_block(ui, r, theme::hex(o.color.as_deref()), block);
         if with_notes(ui.interact(r, Id::new(("achip", k)), Sense::click()), &o.notes).clicked() {
             action = Some(Action::Open(k));
         }
@@ -374,14 +416,16 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
                 );
                 let moving = matches!(drag, Some(Drag::Move { index, .. }) if index == k);
                 let color = theme::hex(o.color.as_deref());
-                let ink = if moving { theme::ink_3() } else { theme::ink() };
                 let start = grid::local(&o.start, s.tz);
                 let end = grid::local(&o.end, s.tz);
-                let mut lines = vec![(o.title.clone(), 13.0, ink)];
-                if r.height() > 34.0 {
-                    lines.push((s.clock.range(start.time(), end.time()), 11.0, theme::ink_2()));
-                }
-                chip(ui, r, color, &lines, block_notes(&o.notes, r.height()));
+                let block = Block {
+                    title: &o.title,
+                    time: (r.height() > 30.0).then(|| s.clock.range(start.time(), end.time())),
+                    notes: block_notes(&o.notes, r.height()),
+                    selected: s.is_selected(o),
+                    faded: moving,
+                };
+                event_block(ui, r, color, block);
                 let resp = with_notes(ui.interact(r, Id::new(("ev", k, day)), Sense::click_and_drag()), &o.notes);
                 if resp.clicked() {
                     action = Some(Action::Open(k));

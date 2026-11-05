@@ -50,6 +50,8 @@ struct App {
     scroll_to: Option<f32>,
     /// The sidebar toggle's choice; until it is used the sidebar shows in wide windows.
     sidebar: Option<bool>,
+    /// The occurrence the editor opened, as (event id, start), drawn solid.
+    selected: Option<(i64, String)>,
     editor: Option<Editor>,
     /// The booking screen replaces the calendar while it is open.
     booking: Option<booking::Screen>,
@@ -77,6 +79,7 @@ impl App {
             loaded_at: std::time::Instant::now(),
             scroll_to: Some(8.0 * views::HOUR_PX),
             sidebar: None,
+            selected: None,
             editor: None,
             booking: None,
             error: None,
@@ -134,6 +137,7 @@ impl App {
     }
 
     fn open_occurrence(&mut self, o: &Occurrence) {
+        self.selected = Some((o.event_id, o.start.clone()));
         match self.db.event(o.event_id) {
             Ok(Some(e)) => self.editor = Some(self.make_editor(Form::open(o, &e, self.tz), Some(e))),
             Ok(None) => self.stale = true,
@@ -544,7 +548,13 @@ impl App {
     fn calendar(&mut self, ui: &mut egui::Ui) {
         let action = egui::CentralPanel::default()
             .show(ui, |ui| {
-                let scene = Scene { occ: &self.occ, tz: self.tz, now: self.now(), clock: self.clock };
+                let scene = Scene {
+                    occ: &self.occ,
+                    tz: self.tz,
+                    now: self.now(),
+                    clock: self.clock,
+                    selected: self.editor.as_ref().and(self.selected.clone()),
+                };
                 match self.view {
                     View::Month => views::month(ui, &scene, self.anchor),
                     View::Agenda => views::agenda(ui, &scene),
@@ -593,6 +603,7 @@ impl App {
         match result {
             Ok(()) => {
                 self.editor = None;
+                self.selected = None;
                 self.stale = true;
             }
             Err(e) => {
