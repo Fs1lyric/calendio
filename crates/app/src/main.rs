@@ -935,17 +935,93 @@ mod frames {
     }
 
     pub fn render(app: &mut App, width: f32, height: f32) -> Vec<(String, egui::Rect)> {
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height));
-        let ctx = egui::Context::default();
-        theme::apply(&ctx);
-        let mut texts = Vec::new();
-        for _ in 0..3 {
-            let mut output =
-                ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| app.show(ui));
-            output.textures_delta.clear();
-            texts = text_rects(&output.shapes, screen);
+        let harness = Harness::new(width, height);
+        text_rects(&harness.settle(app), harness.screen)
+    }
+
+    /// One egui context driving an App frame by frame, with optional input.
+    pub struct Harness {
+        pub ctx: egui::Context,
+        pub screen: egui::Rect,
+    }
+
+    impl Harness {
+        pub fn new(width: f32, height: f32) -> Self {
+            let ctx = egui::Context::default();
+            theme::apply(&ctx);
+            Self { ctx, screen: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height)) }
         }
-        texts
+
+        pub fn run(&self, app: &mut App, events: Vec<egui::Event>) -> Vec<egui::epaint::ClippedShape> {
+            let input = egui::RawInput { screen_rect: Some(self.screen), events, ..Default::default() };
+            let mut output = self.ctx.run_ui(input, |ui| app.show(ui));
+            output.textures_delta.clear();
+            output.shapes
+        }
+
+        /// A few frames so layout settles; the last frame's shapes.
+        pub fn settle(&self, app: &mut App) -> Vec<egui::epaint::ClippedShape> {
+            (0..3).map(|_| self.run(app, Vec::new())).last().unwrap_or_default()
+        }
+
+        pub fn click(&self, app: &mut App, pos: egui::Pos2) {
+            let button = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            self.run(app, vec![egui::Event::PointerMoved(pos)]);
+            self.run(app, vec![button(true)]);
+            self.run(app, vec![button(false)]);
+        }
+    }
+
+    /// Every painted shape, flattened, with the clip rect it is drawn under.
+    pub fn flat(shapes: &[egui::epaint::ClippedShape]) -> Vec<(egui::Rect, egui::Shape)> {
+        fn walk(shape: &egui::Shape, clip: egui::Rect, out: &mut Vec<(egui::Rect, egui::Shape)>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, clip, out)),
+                other => out.push((clip, other.clone())),
+            }
+        }
+        let mut out = Vec::new();
+        for clipped in shapes {
+            walk(&clipped.shape, clipped.clip_rect, &mut out);
+        }
+        out
+    }
+
+    pub fn circles(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::epaint::CircleShape> {
+        flat(shapes)
+            .into_iter()
+            .filter_map(|(clip, s)| match s {
+                egui::Shape::Circle(c) if clip.contains(c.center) => Some(c),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn rects(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::epaint::RectShape> {
+        flat(shapes)
+            .into_iter()
+            .filter_map(|(clip, s)| match s {
+                egui::Shape::Rect(r) if clip.intersects(r.rect) => Some(r),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The colour a label was laid out in.
+    pub fn text_color(shapes: &[egui::epaint::ClippedShape], label: &str, near: egui::Pos2) -> Option<egui::Color32> {
+        flat(shapes).into_iter().find_map(|(_, s)| match s {
+            egui::Shape::Text(t)
+                if t.galley.text() == label && egui::Shape::Text(t.clone()).visual_bounding_rect().contains(near) =>
+            {
+                t.override_text_color.or_else(|| t.galley.job.sections.first().map(|s| s.format.color))
+            }
+            _ => None,
+        })
     }
 
     pub fn find(texts: &[(String, egui::Rect)], label: &str) -> Vec<egui::Rect> {
@@ -1035,5 +1111,106 @@ mod toolbar_tests {
                 assert!(one(&texts, label).right() <= width, "{label} is cut off at {width} px");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod sidebar_tests {
+    use super::frames::{circles, find, one, rects, text_color, text_rects, Harness};
+    use super::*;
+
+    const SIDEBAR: f32 = 240.0;
+
+    fn hex(s: &str) -> egui::Color32 {
+        egui::Color32::from_hex(s).unwrap()
+    }
+
+    fn app_with_calendars() -> (App, i64, i64) {
+        let db = Db::open_in_memory().unwrap();
+        let work = db.create_calendar("Work", "#ff9500").unwrap();
+        let hidden = db.create_calendar("Hobbies", "#34c759").unwrap();
+        db.update_calendar(hidden, "Hobbies", "#34c759", false).unwrap();
+        let mut app = App::new(db, chrono_tz::UTC);
+        let today = app.now().date();
+        app.go(View::Week, today);
+        (app, work, hidden)
+    }
+
+    /// The round checkbox left of a calendar's name.
+    fn dot_beside(shapes: &[egui::epaint::ClippedShape], name: egui::Rect) -> egui::epaint::CircleShape {
+        circles(shapes)
+            .into_iter()
+            .filter(|c| c.center.x < name.left() && (c.center.y - name.center().y).abs() < 4.0)
+            .min_by(|a, b| (name.left() - a.center.x).total_cmp(&(name.left() - b.center.x)))
+            .unwrap_or_else(|| panic!("no round checkbox beside the calendar at {name:?}"))
+    }
+
+    #[test]
+    fn sidebar_groups_calendars_under_my_calendars_with_round_colour_checkboxes() {
+        let (mut app, _, _) = app_with_calendars();
+        let harness = Harness::new(1180.0, 780.0);
+        let shapes = harness.settle(&mut app);
+        let texts = text_rects(&shapes, harness.screen);
+        let header = one(&texts, "My Calendars");
+        assert!(header.left() < SIDEBAR);
+        let mut above = header.bottom();
+        for (name, colour, visible) in
+            [("Personal", "#2457b2", true), ("Work", "#ff9500", true), ("Hobbies", "#34c759", false)]
+        {
+            let rect = one(&texts, name);
+            assert!(rect.left() < SIDEBAR && rect.top() >= above, "{name} is listed under My Calendars, in order");
+            above = rect.bottom();
+            let dot = dot_beside(&shapes, rect);
+            if visible {
+                assert_eq!(dot.fill, hex(colour), "a shown calendar's circle is filled with its colour");
+            } else {
+                assert_eq!(dot.fill, egui::Color32::TRANSPARENT, "a hidden calendar's circle is empty");
+                assert_eq!(dot.stroke.color, hex(colour), "a hidden calendar's ring keeps its colour");
+            }
+        }
+        for gone in ["SCHEDULING", "TIMEZONE", "MY CALENDARS", "Stored on this device", "Booking links & hours"] {
+            assert!(find(&texts, gone).is_empty(), "{gone:?} is gone from the sidebar");
+        }
+    }
+
+    #[test]
+    fn clicking_a_calendar_circle_toggles_its_visibility() {
+        let (mut app, work, _) = app_with_calendars();
+        let harness = Harness::new(1180.0, 780.0);
+        let shapes = harness.settle(&mut app);
+        let dot = dot_beside(&shapes, one(&text_rects(&shapes, harness.screen), "Work"));
+        harness.click(&mut app, dot.center);
+        let visible = |app: &App| app.db.calendars().unwrap().into_iter().find(|c| c.id == work).unwrap().visible;
+        assert!(!visible(&app), "one click hides Work");
+        harness.click(&mut app, dot.center);
+        assert!(visible(&app), "a second click shows it again");
+    }
+
+    #[test]
+    fn mini_month_sits_at_the_bottom_with_today_in_red_and_the_week_tinted() {
+        let (mut app, _, _) = app_with_calendars();
+        let today = app.now().date();
+        let harness = Harness::new(1180.0, 780.0);
+        let shapes = harness.settle(&mut app);
+        let texts = text_rects(&shapes, harness.screen);
+        let header = one(&texts, &today.format("%B %Y").to_string());
+        assert!(header.left() < SIDEBAR && header.top() > 780.0 / 2.0, "the mini month is at the bottom");
+
+        let number = today.day().to_string();
+        let red = circles(&shapes)
+            .into_iter()
+            .filter(|c| c.fill == theme::today() && c.center.x < SIDEBAR && c.center.y > header.bottom())
+            .collect::<Vec<_>>();
+        assert_eq!(red.len(), 1, "one red circle marks today in the mini month");
+        let cell = red[0].center;
+        let label = find(&texts, &number).into_iter().find(|r| r.center().distance(cell) < 3.0);
+        assert!(label.is_some(), "today's number sits in the red circle");
+        assert_eq!(text_color(&shapes, &number, cell), Some(egui::Color32::WHITE), "today's number is white");
+
+        let band = rects(&shapes)
+            .into_iter()
+            .find(|r| r.fill == theme::tint() && r.rect.contains(cell) && r.rect.right() < SIDEBAR + 1.0);
+        let band = band.expect("the selected week is tinted");
+        assert!(band.rect.width() > 150.0, "the tint spans the whole week, not one day");
     }
 }
