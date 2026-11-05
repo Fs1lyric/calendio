@@ -149,7 +149,16 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
         if r.hovered() {
             painter.rect_filled(cell, 0.0, theme::hover());
         }
-        painter.rect_stroke(cell, 0.0, Stroke::new(1.0, theme::line()), StrokeKind::Inside);
+        // One hairline above each week and between days, never doubled.
+        let ppp = ui.ctx().pixels_per_point();
+        let crisp = |v: f32| ((v * ppp).floor() + 0.5) / ppp;
+        let hairline = Stroke::new(1.0 / ppp, theme::line());
+        let top = crisp(cell.top());
+        painter.line_segment([Pos2::new(cell.left(), top), Pos2::new(cell.right(), top)], hairline);
+        if col > 0 {
+            let x = crisp(cell.left());
+            painter.line_segment([Pos2::new(x, cell.top()), Pos2::new(x, cell.bottom())], hairline);
+        }
         if r.clicked() {
             action = Some(Action::New { start: at(day, 9), end: at(day, 10), all_day: false });
         }
@@ -256,26 +265,34 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
     let col_w = (full.width() - GUTTER) / days.len() as f32;
     let col_x = |i: usize| full.left() + GUTTER + col_w * i as f32;
 
-    // Day headers: "Mon 19", today's number white in a red circle.
+    // Day headers: "Mon 19", today's number white in a red circle. Columns
+    // too narrow for one line (a phone-width week) stack the weekday on top.
     let head = 36.0;
+    let stacked = col_w < 72.0;
     let (head_rect, _) = ui.allocate_exact_size(egui::vec2(full.width(), head), Sense::hover());
     for (i, &day) in days.iter().enumerate() {
         let r = Rect::from_min_size(Pos2::new(col_x(i), head_rect.top()), egui::vec2(col_w, head));
         let today = day == s.now.date();
         let (name_color, number_color) =
             if today { (theme::today(), Color32::WHITE) } else { (theme::ink_2(), theme::ink()) };
-        let name = ui.ctx().fonts_mut(|f| f.layout_no_wrap(day.format("%a").to_string(), font(13.0), name_color));
+        let name_font = font(if stacked { 11.0 } else { 13.0 });
+        let name = ui.ctx().fonts_mut(|f| f.layout_no_wrap(day.format("%a").to_string(), name_font, name_color));
         let number_font = if today { theme::semibold(13.0) } else { font(13.0) };
         let number = ui.ctx().fonts_mut(|f| f.layout_no_wrap(day.day().to_string(), number_font, number_color));
-        // Only today's number needs room for its circle.
-        let circle = 22.0;
-        let slot = if today { circle } else { number.size().x };
-        let gap = if today { 3.0 } else { 5.0 };
-        let width = name.size().x + gap + slot;
-        let left = r.center().x - width / 2.0;
         let p = ui.painter();
-        p.galley(Pos2::new(left, r.center().y - name.size().y / 2.0), name, name_color);
-        let c = Pos2::new(left + width - slot / 2.0, r.center().y);
+        let circle = if stacked { 20.0 } else { 22.0 };
+        let c = if stacked {
+            p.galley(Pos2::new(r.center().x - name.size().x / 2.0, r.top() + 2.0), name, name_color);
+            Pos2::new(r.center().x, r.top() + 25.0)
+        } else {
+            // Only today's number needs room for its circle.
+            let slot = if today { circle } else { number.size().x };
+            let gap = if today { 3.0 } else { 5.0 };
+            let width = name.size().x + gap + slot;
+            let left = r.center().x - width / 2.0;
+            p.galley(Pos2::new(left, r.center().y - name.size().y / 2.0), name, name_color);
+            Pos2::new(left + width - slot / 2.0, r.center().y)
+        };
         if today {
             p.circle_filled(c, circle / 2.0, theme::today());
         }
@@ -353,7 +370,7 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
             p.line_segment([Pos2::new(left, line), Pos2::new(right, line)], Stroke::new(1.0 / ppp, theme::line()));
             let faint = theme::line().gamma_multiply(0.45);
             p.line_segment([Pos2::new(left, half), Pos2::new(right, half)], Stroke::new(1.0 / ppp, faint));
-            let near_now = now_y.is_some_and(|n| (n - y).abs() < 12.0);
+            let near_now = now_y.is_some_and(|n| (n - y).abs() < 18.0);
             if h > 0 && !near_now {
                 p.text(
                     Pos2::new(left - 8.0, y),
