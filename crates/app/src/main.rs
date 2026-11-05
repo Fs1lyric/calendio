@@ -839,8 +839,9 @@ mod improvement_tests {
         app.new_event();
         let mut texts = Vec::new();
         for _ in 0..3 {
-            let output =
+            let mut output =
                 ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| app.show(ui));
+            output.textures_delta.clear();
             texts = visible_texts(&output.shapes, screen);
         }
         for label in ["Save", "Cancel"] {
