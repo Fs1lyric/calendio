@@ -29,8 +29,12 @@ shoot() {
     shift 2
     ./target/debug/calendio --size "${width}x780" "$@" &
     local app=$!
-    sleep 5
-    import -window root -crop "${width}x780+0+0" +repage "$out/$name.png"
+    # The first launch can take longer than 5 s to draw; retake a black frame.
+    for wait in 5 4 4; do
+        sleep "$wait"
+        import -window root -crop "${width}x780+0+0" +repage "$out/$name.png"
+        [ "$(convert "$out/$name.png" -format '%[fx:mean>0]' info:)" = 1 ] && break
+    done
     kill "$app"
     wait "$app" 2>/dev/null || true
 }
