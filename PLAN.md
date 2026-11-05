@@ -70,11 +70,31 @@ What changed besides the steps above:
 - A stale occurrence index reloads instead of panicking; an incomplete series form
   returns an error.
 
-## Next (not in this plan)
+## Next session: start here (the four leftovers)
 
-- Year view: its twelve month cards still use grey day tiles; restyle them like the
-  sidebar mini month.
-- Agenda rows are full-width buttons with centred text; make them Apple-style lists.
-- A multi-day all-day event is a separate pill on each day in the month; join them.
-- The right-hand today panel (windows ≥ 1440 px) and quick add still print 24-hour
-  times.
+Same rules: test first, push, read CI; never launch or build locally. Test helpers
+live in `main.rs` `mod frames` (`Harness`, `text_rects`, `circles`, `rects`,
+`text_color`, `text_font`) and `views.rs` tests (`week_at`, `month_at`, `event`).
+
+1. **Year view** (`views.rs` `year`): its month cards use egui Buttons, which paint
+   grey tiles. Pull the painted mini month out of `navigation.rs` `Navigation::show`
+   into a shared `paint_month(ui, month, today, tint)` and use it for both. Keep the
+   busy-day mark from `year_busy_days` as a small dot under the number. Test: no
+   `surface_2` rect behind year-view day numbers; today white in a red circle.
+2. **Agenda** (`views.rs` `agenda`): rows are full-width Buttons with centred text.
+   Make an Apple list: a semibold day header ("Thursday, 5 November"), then per
+   event a colour dot, the title left in ink, the time right in `ink_2`, hairline
+   separators, hover tint, click opens. Test: title starts near the left, time ends
+   near the right, dot filled with the event colour.
+3. **Joined all-day pills in the month** (`views.rs` `month`): a multi-day all-day
+   event is one pill per day. Per week row, lay out all-day events as spans of
+   columns with `grid::pack`, draw one pill per span with the title once, and start
+   timed lines below the lanes. Test: a Fri–Sun trip is one rect about three
+   columns wide with one "Trip" label.
+4. **12/24-hour everywhere** (`navigation.rs` `today_agenda`, `quick_add.rs`
+   preview): pass `Clock` and use `range`/`short`. Test: the today panel with
+   `Clock::H12` shows "9 – 10 AM". Screenshot the today panel: widen Xvfb in
+   `tests/screenshots.sh` to 1600x780 and add a `week-light-1500` shot.
+
+Done when CI is green and the year, agenda, month and 1500-wide shots look like
+Apple Calendar in light and dark.
