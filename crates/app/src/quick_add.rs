@@ -42,22 +42,24 @@ fn weekday(input: &str) -> Option<u32> {
 pub fn parse(input: &str, now: NaiveDateTime, tz: Tz) -> Result<Form, String> {
     let mut parts: Vec<&str> = input.split_whitespace().collect();
     let mut minutes = 60;
-    if parts.len() >= 2 && parts[parts.len() - 2].eq_ignore_ascii_case("for") {
-        let value = parts.pop().unwrap().to_ascii_lowercase();
-        parts.pop();
-        let (amount, multiplier) = if let Some(raw) = value.strip_suffix('m') {
-            (raw, 1)
-        } else if let Some(raw) = value.strip_suffix('h') {
-            (raw, 60)
-        } else {
-            return Err("Use a duration such as 30m or 2h".into());
-        };
-        minutes = amount
-            .parse::<i64>()
-            .ok()
-            .and_then(|n| n.checked_mul(multiplier))
-            .filter(|n| (1..=1440).contains(n))
-            .ok_or("Duration must be between 1 minute and 24 hours")?;
+    if let [.., word, value] = parts[..] {
+        if word.eq_ignore_ascii_case("for") {
+            let value = value.to_ascii_lowercase();
+            parts.truncate(parts.len() - 2);
+            let (amount, multiplier) = if let Some(raw) = value.strip_suffix('m') {
+                (raw, 1)
+            } else if let Some(raw) = value.strip_suffix('h') {
+                (raw, 60)
+            } else {
+                return Err("Use a duration such as 30m or 2h".into());
+            };
+            minutes = amount
+                .parse::<i64>()
+                .ok()
+                .and_then(|n| n.checked_mul(multiplier))
+                .filter(|n| (1..=1440).contains(n))
+                .ok_or("Duration must be between 1 minute and 24 hours")?;
+        }
     }
     let at = parts.iter().rposition(|p| p.eq_ignore_ascii_case("at")).ok_or("Use: title tomorrow at 14:30 for 45m")?;
     if at == 0 || at + 2 != parts.len() {

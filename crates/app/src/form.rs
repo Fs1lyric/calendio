@@ -206,9 +206,12 @@ impl Form {
     pub fn save(&self, scope: Scope, series: Option<&Event>) -> Result<Save, String> {
         let (start, end) = self.stored_span(self.start, self.end)?;
         if self.is_series() && scope == Scope::One {
+            let (Some(event_id), Some(original_start)) = (self.event_id, self.original_start.clone()) else {
+                return Err("This occurrence has lost its event; close it and open it again".into());
+            };
             return Ok(Save::Exception(Exception {
-                event_id: self.event_id.expect("an occurrence belongs to an event"),
-                original_start: self.original_start.clone().expect("checked by is_series"),
+                event_id,
+                original_start,
                 cancelled: false,
                 title: Some(self.title.trim().to_string()),
                 notes: Some(self.notes.clone()),
