@@ -156,6 +156,29 @@ color!(accent, accent);
 color!(danger, danger);
 color!(today, today);
 
+fn is_dark() -> bool {
+    PALETTE.with(|p| p.get().dark)
+}
+
+/// The chosen segment of a segmented control: white on light themes, a lifted grey on dark.
+pub fn raised() -> Color32 {
+    if is_dark() {
+        surface_2().lerp_to_gamma(ink(), 0.22)
+    } else {
+        Color32::WHITE
+    }
+}
+
+/// A faint tint under a hovered borderless control.
+pub fn hover() -> Color32 {
+    ink().gamma_multiply(0.07)
+}
+
+/// The soft drop shadow under a raised control.
+pub fn shadow() -> Color32 {
+    Color32::from_black_alpha(if is_dark() { 90 } else { 28 })
+}
+
 /// Inter (OFL, `assets/Inter-LICENSE.txt`) at three weights. egui has no font
 /// weights, so SemiBold and Bold are named families; the default fonts stay
 /// behind each one for symbols and emoji Inter lacks.
@@ -215,7 +238,7 @@ pub fn soft(c: Color32) -> Color32 {
 
 pub fn apply(ctx: &egui::Context) {
     install_fonts(ctx);
-    let mut v = if PALETTE.with(|p| p.get().dark) { Visuals::dark() } else { Visuals::light() };
+    let mut v = if is_dark() { Visuals::dark() } else { Visuals::light() };
     v.panel_fill = bg();
     v.window_fill = surface();
     v.window_stroke = Stroke::new(1.0, line());
