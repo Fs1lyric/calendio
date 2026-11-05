@@ -220,6 +220,62 @@ fn install_fonts(ctx: &egui::Context) {
     }
 }
 
+/// WCAG relative luminance.
+pub fn luminance(c: Color32) -> f32 {
+    let linear = |v: u8| {
+        let v = f32::from(v) / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+}
+
+/// WCAG contrast ratio, from 1 to 21.
+pub fn contrast(a: Color32, b: Color32) -> f32 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// How an event block is painted.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EventColors {
+    pub fill: Color32,
+    pub bar: Color32,
+    pub title: Color32,
+}
+
+/// Apple Calendar's event block: the calendar colour at 18% (30% on dark)
+/// with a solid bar and a title shaded from the colour until it reads at 4.5:1.
+/// Selected, the block is solid with white text, unless the colour is too pale.
+pub fn event_colors(colour: Color32, selected: bool) -> EventColors {
+    if selected {
+        let title = if contrast(Color32::WHITE, colour) >= 2.0 {
+            Color32::WHITE
+        } else {
+            readable_shade(colour, colour, Color32::BLACK)
+        };
+        return EventColors { fill: colour, bar: colour, title };
+    }
+    let (alpha, toward) = if is_dark() { (0.30, Color32::WHITE) } else { (0.18, Color32::BLACK) };
+    let fill = bg().lerp_to_gamma(colour, alpha);
+    EventColors { fill, bar: colour, title: readable_shade(colour, fill, toward) }
+}
+
+/// `colour` mixed towards `toward`, a little at a time, until it reads on `on`.
+fn readable_shade(colour: Color32, on: Color32, toward: Color32) -> Color32 {
+    let mut t = 0.35;
+    loop {
+        let shade = colour.lerp_to_gamma(toward, t);
+        if contrast(shade, on) >= 4.5 || t >= 1.0 {
+            return shade;
+        }
+        t = (t + 0.05_f32).min(1.0);
+    }
+}
+
 /// Event colours, stored on the event as `#rrggbb`.
 pub const SWATCHES: [(&str, &str); 7] = [
     ("Lilac", "#f4c3e8"),
@@ -280,18 +336,6 @@ pub fn apply(ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn luminance(c: Color32) -> f32 {
-        let linear = |v: u8| {
-            let v = f32::from(v) / 255.0;
-            if v <= 0.04045 {
-                v / 12.92
-            } else {
-                ((v + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
-    }
 
     #[test]
     fn themes_resolve_and_follow_system() {
