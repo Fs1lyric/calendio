@@ -1,9 +1,9 @@
 //! Compact date navigation and the independent today agenda.
-use crate::{grid, theme};
+use crate::{chrome, grid, grid::View, theme};
 use calendio_core::{details::EventDetails, recur::Occurrence};
 use chrono::{Datelike, NaiveDate, NaiveDateTime};
 use chrono_tz::Tz;
-use eframe::egui::{self, RichText};
+use eframe::egui::{self, pos2, vec2, Align2, Color32, CornerRadius, FontId, Rect, RichText, Sense};
 
 fn month_days(anchor: NaiveDate) -> Vec<NaiveDate> {
     grid::days(grid::View::Month, anchor)
@@ -19,50 +19,75 @@ impl Navigation {
     pub fn sync(&mut self, day: NaiveDate) {
         self.month = day.with_day(1).expect("month has a first day");
     }
-    pub fn show(&mut self, ui: &mut egui::Ui, selected: NaiveDate, today: NaiveDate) -> Option<NaiveDate> {
-        let mut chosen = None;
-        ui.scope(|ui| {
-            ui.spacing_mut().button_padding = egui::vec2(2.0, 3.0);
-            ui.spacing_mut().interact_size = egui::vec2(24.0, 24.0);
-            ui.horizontal(|ui| {
-                if ui.button("‹").on_hover_text("Previous month").clicked() {
-                    self.month = grid::step(grid::View::Month, self.month, -1);
+    /// The mini month: today in a red circle, the week on screen tinted (the
+    /// day, in Day view). Returns a clicked day.
+    pub fn show(&mut self, ui: &mut egui::Ui, view: View, anchor: NaiveDate, today: NaiveDate) -> Option<NaiveDate> {
+        let width = ui.available_width();
+        ui.horizontal(|ui| {
+            let title = RichText::new(self.month.format("%B %Y").to_string()).font(theme::semibold(13.0));
+            ui.label(title.color(theme::ink()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                if chrome::glyph_button(ui, "›", 16.0, "Next month").clicked() {
+                    self.month = grid::step(View::Month, self.month, 1);
                 }
-                ui.label(RichText::new(self.month.format("%B %Y").to_string()).strong());
-                if ui.button("›").on_hover_text("Next month").clicked() {
-                    self.month = grid::step(grid::View::Month, self.month, 1);
-                }
-            });
-            ui.add_space(8.0);
-            let cell = ((ui.available_width() - 14.0) / 7.0).floor();
-            egui::Grid::new("sidebar-month").num_columns(7).spacing([2.0, 2.0]).show(ui, |ui| {
-                for label in ["M", "T", "W", "T", "F", "S", "S"] {
-                    ui.add_sized([cell, 18.0], egui::Label::new(RichText::new(label).size(10.0).color(theme::ink_3())));
-                }
-                ui.end_row();
-                for (index, day) in month_days(self.month).into_iter().enumerate() {
-                    let mut label = RichText::new(day.day().to_string()).size(12.0);
-                    if day.month() != self.month.month() {
-                        label = label.color(theme::ink_3());
-                    }
-                    if day == today {
-                        label = label.strong().color(theme::today());
-                    }
-                    if ui
-                        .add_sized([cell, 25.0], egui::Button::new(label).selected(day == selected))
-                        .on_hover_text(day.format("%A %-d %B %Y").to_string())
-                        .clicked()
-                    {
-                        chosen = Some(day);
-                    }
-                    if index % 7 == 6 {
-                        ui.end_row();
-                    }
+                if chrome::glyph_button(ui, "‹", 16.0, "Previous month").clicked() {
+                    self.month = grid::step(View::Month, self.month, -1);
                 }
             });
         });
+        ui.add_space(4.0);
+
+        let cell = (width / 7.0).floor();
+        let (rect, _) = ui.allocate_exact_size(vec2(cell * 7.0, HEAD + ROW * 6.0), Sense::hover());
+        let p = ui.painter();
+        for (i, label) in ["M", "T", "W", "T", "F", "S", "S"].into_iter().enumerate() {
+            let at = pos2(rect.left() + cell * (i as f32 + 0.5), rect.top() + HEAD / 2.0);
+            p.text(at, Align2::CENTER_CENTER, label, FontId::proportional(10.5), theme::ink_3());
+        }
+        let days = month_days(self.month);
+        let top = rect.top() + HEAD;
+        if let Some(row) = tinted_row(&days, view, anchor) {
+            let band =
+                Rect::from_min_size(pos2(rect.left(), top + ROW * row as f32 + 1.0), vec2(cell * 7.0, ROW - 2.0));
+            p.rect_filled(band, CornerRadius::same(6), theme::tint());
+        }
+        let mut chosen = None;
+        for (i, &day) in days.iter().enumerate() {
+            let centre = pos2(rect.left() + cell * ((i % 7) as f32 + 0.5), top + ROW * ((i / 7) as f32 + 0.5));
+            let response = ui.interact(
+                Rect::from_center_size(centre, vec2(cell, ROW)),
+                ui.id().with(("mini-day", day)),
+                Sense::click(),
+            );
+            let mut colour = if day.month() == self.month.month() { theme::ink() } else { theme::ink_3() };
+            let mut font = FontId::proportional(12.0);
+            if day == today {
+                p.circle_filled(centre, 10.5, theme::today());
+                (colour, font) = (Color32::WHITE, theme::semibold(12.0));
+            } else if view == View::Day && day == anchor {
+                p.circle_filled(centre, 10.5, theme::tint());
+            } else if response.hovered() {
+                p.circle_filled(centre, 10.5, theme::hover());
+            }
+            p.text(centre, Align2::CENTER_CENTER, day.day().to_string(), font, colour);
+            if response.on_hover_text(day.format("%A %-d %B %Y").to_string()).clicked() {
+                chosen = Some(day);
+            }
+        }
         chosen
     }
+}
+
+/// Weekday initials, then six weeks.
+const HEAD: f32 = 18.0;
+const ROW: f32 = 26.0;
+/// The mini month's height, so the sidebar can pin it to the bottom.
+pub const MINI_MONTH_H: f32 = 46.0 + HEAD + ROW * 6.0;
+
+/// Which of the mini month's six rows to tint: the week on screen in Week view.
+fn tinted_row(days: &[NaiveDate], view: View, anchor: NaiveDate) -> Option<usize> {
+    (view == View::Week).then(|| days.iter().position(|&d| d == anchor)).flatten().map(|i| i / 7)
 }
 
 pub struct TodayItem {
@@ -136,6 +161,18 @@ mod tests {
         assert_eq!(days[41].to_string(), "2026-11-08");
     }
     #[test]
+    fn only_the_week_on_screen_is_tinted() {
+        let anchor = chrono::NaiveDate::from_ymd_opt(2026, 11, 5).unwrap();
+        let days = month_days(anchor);
+        assert_eq!(tinted_row(&days, View::Week, anchor), Some(1), "26 Oct–1 Nov is row 0, so 5 Nov is row 1");
+        assert_eq!(tinted_row(&days, View::Week, days[41]), Some(5));
+        assert_eq!(tinted_row(&days, View::Month, anchor), None);
+        assert_eq!(tinted_row(&days, View::Day, anchor), None);
+        let elsewhere = chrono::NaiveDate::from_ymd_opt(2027, 3, 1).unwrap();
+        assert_eq!(tinted_row(&days, View::Week, elsewhere), None);
+    }
+
+    #[test]
     fn compact_navigation_fits_the_sidebar() {
         let context = eframe::egui::Context::default();
         crate::theme::apply(&context);
@@ -151,7 +188,7 @@ mod tests {
                 ..Default::default()
             },
             |ui| {
-                nav.show(ui, day, day);
+                nav.show(ui, View::Week, day, day);
                 used = ui.min_rect().width();
             },
         );

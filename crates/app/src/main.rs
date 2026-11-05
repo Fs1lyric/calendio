@@ -468,32 +468,25 @@ impl App {
         }
         let show_today = ui.available_width() >= 1440.0;
         if sidebar_shown {
-            egui::Panel::left("navigation").resizable(false).default_size(232.0).show(ui, |ui| {
-                egui::ScrollArea::vertical().id_salt("sidebar-scroll").show(ui, |ui| {
-                    ui.add_space(20.0);
-                    let today = self.now().date();
-                    if let Some(day) = self.navigation.show(ui, self.anchor, today) {
-                        self.go(if self.view == View::Year { View::Day } else { self.view }, day);
-                    }
-                    ui.add_space(20.0);
-                    ui.label(RichText::new("SCHEDULING").size(11.0).color(theme::ink_3()));
-                    if ui.selectable_label(self.booking.is_some(), "Booking links & hours").clicked() {
-                        self.open_booking();
-                    }
-                    ui.add_space(24.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-                    ui.label(RichText::new("MY CALENDARS").size(11.0).color(theme::ink_3()));
+            let frame = egui::Frame::new().fill(theme::surface()).inner_margin(egui::Margin::symmetric(12, 14));
+            egui::Panel::left("navigation").resizable(false).default_size(232.0).frame(frame).show(ui, |ui| {
+                let full = ui.available_rect_before_wrap();
+                let split = (full.bottom() - navigation::MINI_MONTH_H).max(full.top() + 60.0);
+                let list = egui::Rect::from_min_max(full.min, egui::pos2(full.right(), split - 8.0));
+                let mut top = ui.new_child(egui::UiBuilder::new().max_rect(list));
+                egui::ScrollArea::vertical().id_salt("sidebar-scroll").max_height(list.height()).show(&mut top, |ui| {
                     match self.workspace.sidebar(ui, &self.db) {
                         Ok(changed) => self.stale |= changed,
                         Err(e) => self.error = Some(e),
                     }
-                    ui.add_space(20.0);
-                    ui.label(RichText::new("TIMEZONE").size(11.0).color(theme::ink_3()));
-                    ui.label(self.tz.to_string());
-                    ui.add_space(16.0);
-                    ui.label(RichText::new("Stored on this device").small().color(theme::ink_3()));
                 });
+                let mini = egui::Rect::from_min_max(egui::pos2(full.left(), split), full.max);
+                let mut bottom = ui.new_child(egui::UiBuilder::new().max_rect(mini));
+                let today = self.now().date();
+                if let Some(day) = self.navigation.show(&mut bottom, self.view, self.anchor, today) {
+                    self.go(if self.view == View::Year { View::Day } else { self.view }, day);
+                }
+                ui.allocate_rect(full, egui::Sense::hover());
             });
         }
         if show_today && self.booking.is_none() && !self.workspace.search_open {
