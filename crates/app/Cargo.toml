@@ -13,6 +13,9 @@ chrono-tz.workspace = true
 eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
 iana-time-zone = "0.1"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [[bin]]
 name = "calendio"
 path = "src/main.rs"
