@@ -602,8 +602,13 @@ mod tests {
         };
         let occurrences =
             [make("2026-10-19T23:00:00Z", "2026-10-21T00:00:00Z", false), make("2026-10-23", "2026-10-25", true)];
-        let scene =
-            Scene { occ: &occurrences, tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap(), clock: Clock::H12 };
+        let scene = Scene {
+            occ: &occurrences,
+            tz: chrono_tz::UTC,
+            now: day.and_hms_opt(9, 0, 0).unwrap(),
+            clock: Clock::H12,
+            selected: None,
+        };
         let busy = year_busy_days(&scene, day);
         for n in [19, 20, 23, 24] {
             assert!(busy.contains(&NaiveDate::from_ymd_opt(2026, 10, n).unwrap()));
@@ -619,8 +624,13 @@ mod tests {
             let context = egui::Context::default();
             theme::apply(&context);
             let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
-            let scene =
-                Scene { occ: &[], tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap(), clock: Clock::H12 };
+            let scene = Scene {
+                occ: &[],
+                tz: chrono_tz::UTC,
+                now: day.and_hms_opt(9, 0, 0).unwrap(),
+                clock: Clock::H12,
+                selected: None,
+            };
             let mut used = 0.0;
             let mut output = context.run_ui(
                 egui::RawInput {
@@ -644,8 +654,13 @@ mod tests {
                 let context = egui::Context::default();
                 theme::apply(&context);
                 let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
-                let scene =
-                    Scene { occ: &[], tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap(), clock: Clock::H12 };
+                let scene = Scene {
+                    occ: &[],
+                    tz: chrono_tz::UTC,
+                    now: day.and_hms_opt(9, 0, 0).unwrap(),
+                    clock: Clock::H12,
+                    selected: None,
+                };
                 let mut output = context.run_ui(
                     egui::RawInput {
                         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(width, 780.0))),
@@ -674,11 +689,19 @@ mod tests {
 
     /// A week (19–25 Oct 2026) with "now" on Wednesday at 10:30, scrolled to 8 AM.
     fn week_frame(clock: Clock) -> (Vec<egui::epaint::ClippedShape>, Rect) {
+        week_with(&[], None, clock)
+    }
+
+    fn week_with(
+        occ: &[Occurrence],
+        selected: Option<(i64, String)>,
+        clock: Clock,
+    ) -> (Vec<egui::epaint::ClippedShape>, Rect) {
         let context = egui::Context::default();
         theme::Theme::AppleLight.apply(&context);
         let monday = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
         let now = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap().and_hms_opt(10, 30, 0).unwrap();
-        let scene = Scene { occ: &[], tz: chrono_tz::UTC, now, clock };
+        let scene = Scene { occ, tz: chrono_tz::UTC, now, clock, selected };
         let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(1180.0, 780.0));
         let mut shapes = Vec::new();
         for frame in 0..3 {
@@ -792,6 +815,60 @@ mod tests {
         let [a, b] = red[0];
         assert!((a.x - (GUTTER + 2.0 * col_w)).abs() < 2.0 && (b.x - (GUTTER + 3.0 * col_w)).abs() < 2.0);
         assert!((a.y - pill_text.center().y).abs() < 2.0, "the pill sits on the line");
+    }
+
+    fn planning(colour: &str) -> Occurrence {
+        Occurrence {
+            event_id: 7,
+            title: "Planning".into(),
+            notes: String::new(),
+            start: "2026-10-22T09:00:00Z".into(),
+            end: "2026-10-22T10:00:00Z".into(),
+            all_day: false,
+            color: Some(colour.into()),
+            reminder_minutes: None,
+            booking_id: None,
+            original_start: None,
+        }
+    }
+
+    /// The painted rectangle with `fill` that holds the label's centre.
+    fn block_under(shapes: &[egui::epaint::ClippedShape], fill: Color32, at: Pos2) -> egui::epaint::RectShape {
+        crate::frames::rects(shapes)
+            .into_iter()
+            .find(|r| r.fill == fill && r.rect.contains(at))
+            .unwrap_or_else(|| panic!("no block filled {fill:?} under {at:?}"))
+    }
+
+    #[test]
+    fn event_blocks_have_a_tinted_fill_a_left_bar_and_a_semibold_title_over_the_time() {
+        let blue = Color32::from_rgb(0x24, 0x57, 0xb2);
+        let (shapes, screen) = week_with(&[planning("#2457b2")], None, Clock::H12);
+        let colours = theme::event_colors(blue, false);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let title = crate::frames::one(&texts, "Planning");
+        let time = crate::frames::one(&texts, "9 – 10 AM");
+        assert!(time.top() >= title.bottom() - 1.0 && (time.left() - title.left()).abs() < 1.0, "time under title");
+        let block = block_under(&shapes, colours.fill, title.center());
+        assert_eq!(block.corner_radius, CornerRadius::same(5));
+        let bar = crate::frames::rects(&shapes).into_iter().find(|r| {
+            r.fill == blue && (r.rect.width() - 3.0).abs() < 0.01 && (r.rect.left() - block.rect.left()).abs() < 0.5
+        });
+        let bar = bar.expect("a 3 px bar in the calendar colour on the block's left edge");
+        assert!((bar.rect.height() - block.rect.height()).abs() < 0.5, "the bar runs the block's height");
+        assert_eq!(crate::frames::text_color(&shapes, "Planning", title.center()), Some(colours.title));
+        let font = crate::frames::text_font(&shapes, "Planning", title.center()).unwrap();
+        assert_eq!(font.family, egui::FontFamily::Name("semibold".into()), "the title is semibold");
+    }
+
+    #[test]
+    fn the_selected_event_is_solid_with_white_text() {
+        let blue = Color32::from_rgb(0x24, 0x57, 0xb2);
+        let selected = Some((7, "2026-10-22T09:00:00Z".to_owned()));
+        let (shapes, screen) = week_with(&[planning("#2457b2")], selected, Clock::H12);
+        let title = crate::frames::one(&crate::frames::text_rects(&shapes, screen), "Planning");
+        block_under(&shapes, blue, title.center());
+        assert_eq!(crate::frames::text_color(&shapes, "Planning", title.center()), Some(Color32::WHITE));
     }
 
     #[test]

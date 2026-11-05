@@ -1011,6 +1011,18 @@ mod frames {
             .collect()
     }
 
+    /// The font a label was laid out in.
+    pub fn text_font(shapes: &[egui::epaint::ClippedShape], label: &str, near: egui::Pos2) -> Option<egui::FontId> {
+        flat(shapes).into_iter().find_map(|(_, s)| match s {
+            egui::Shape::Text(t)
+                if t.galley.text() == label && egui::Shape::Text(t.clone()).visual_bounding_rect().contains(near) =>
+            {
+                t.galley.job.sections.first().map(|s| s.format.font_id.clone())
+            }
+            _ => None,
+        })
+    }
+
     /// The colour a label was laid out in.
     pub fn text_color(shapes: &[egui::epaint::ClippedShape], label: &str, near: egui::Pos2) -> Option<egui::Color32> {
         flat(shapes).into_iter().find_map(|(_, s)| match s {

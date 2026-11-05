@@ -365,6 +365,45 @@ mod tests {
         assert_eq!(families[&egui::FontFamily::Name("bold".into())][0], "Inter Bold");
     }
 
+    /// Apple's system colours plus every swatch an event can pick.
+    fn event_palette() -> Vec<Color32> {
+        let mut colours: Vec<Color32> =
+            [0xff3b30, 0xff9500, 0x34c759, 0x007aff, 0xaf52de, 0x2457b2].into_iter().map(rgb).collect();
+        colours.extend(SWATCHES.iter().map(|(_, h)| hex(Some(h))));
+        colours
+    }
+
+    #[test]
+    fn event_blocks_are_tinted_with_a_solid_bar_and_a_darker_readable_title() {
+        for (theme, alpha) in [(Theme::AppleLight, 0.18), (Theme::AppleDark, 0.30)] {
+            theme.apply(&egui::Context::default());
+            for colour in event_palette() {
+                let c = event_colors(colour, false);
+                assert_eq!(c.fill, bg().lerp_to_gamma(colour, alpha), "{colour:?} fill in {}", theme.label());
+                assert_eq!(c.bar, colour, "the bar is the calendar colour");
+                assert!(contrast(c.title, c.fill) >= 4.5, "{colour:?} title is readable in {}", theme.label());
+                assert_ne!(c.title, ink(), "the title is a shade of the calendar colour, not plain ink");
+                if theme == Theme::AppleLight {
+                    assert!(luminance(c.title) < luminance(colour), "light theme titles are darker than the colour");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_selected_event_is_solid_with_white_text() {
+        Theme::AppleLight.apply(&egui::Context::default());
+        for colour in [0xff3b30, 0x007aff, 0x34c759, 0xaf52de, 0x2457b2].map(rgb) {
+            let c = event_colors(colour, true);
+            assert_eq!((c.fill, c.title), (colour, Color32::WHITE), "{colour:?}");
+        }
+        // A pastel too pale for white text keeps a dark, readable title.
+        let cream = hex(Some("#f5dfb4"));
+        let c = event_colors(cream, true);
+        assert_eq!(c.fill, cream);
+        assert!(contrast(c.title, c.fill) >= 4.5);
+    }
+
     #[test]
     fn calendar_uses_a_light_canvas_with_readable_text() {
         Theme::White.apply(&egui::Context::default());
