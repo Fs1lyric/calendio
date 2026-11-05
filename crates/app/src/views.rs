@@ -217,7 +217,10 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
                 let start = s.clock.short(grid::local(&o.start, s.tz).time());
                 let mut job = egui::text::LayoutJob::default();
                 let section = |color| egui::TextFormat { font_id: font(12.0), color, ..Default::default() };
-                job.append(&format!("{start} "), 0.0, section(theme::ink_2()));
+                // A phone-width cell has no room for both; the title matters more.
+                if cell.width() >= 90.0 {
+                    job.append(&format!("{start} "), 0.0, section(theme::ink_2()));
+                }
                 job.append(&o.title, 0.0, section(theme::ink()));
                 let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
                 let at = Pos2::new(r.left() + 13.0, r.center().y - galley.size().y / 2.0);
