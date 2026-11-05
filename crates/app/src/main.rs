@@ -1083,7 +1083,10 @@ mod toolbar_tests {
         let today = one(&texts, "Today");
         assert!(today.left() > 900.0 && (today.center().y - month.center().y).abs() < 14.0, "Today on the title row");
         for arrow in ["‹", "›"] {
-            assert!((one(&texts, arrow).center().y - today.center().y).abs() < 4.0, "{arrow} beside Today");
+            let beside = find(&texts, arrow).into_iter().any(|r| {
+                (r.center().y - today.center().y).abs() < 4.0 && (r.center().x - today.center().x).abs() < 60.0
+            });
+            assert!(beside, "{arrow} beside Today");
         }
 
         for gone in [

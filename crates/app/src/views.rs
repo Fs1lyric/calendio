@@ -784,7 +784,9 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let near = |target: f32| lines.iter().find(|(y, _)| (y - target).abs() < 1.0).map(|(_, s)| *s);
+        // Label rects are glyph ink, a few points off the line they are centred on;
+        // lines are 24 points apart, so 6 is unambiguous.
+        let near = |target: f32| lines.iter().find(|(y, _)| (y - target).abs() < 6.0).map(|(_, s)| *s);
         let hour = near(nine).expect("an hour line at 9 AM");
         let half = near((nine + ten) / 2.0).expect("a half-hour line at 9:30");
         assert!(hour.width <= 1.0, "hour lines are hairlines");
