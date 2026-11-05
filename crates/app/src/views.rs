@@ -753,12 +753,21 @@ mod tests {
         selected: Option<(i64, String)>,
         clock: Clock,
     ) -> (Vec<egui::epaint::ClippedShape>, Rect) {
+        week_at(occ, selected, clock, 1180.0)
+    }
+
+    fn week_at(
+        occ: &[Occurrence],
+        selected: Option<(i64, String)>,
+        clock: Clock,
+        width: f32,
+    ) -> (Vec<egui::epaint::ClippedShape>, Rect) {
         let context = egui::Context::default();
         theme::Theme::AppleLight.apply(&context);
         let monday = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
         let now = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap().and_hms_opt(10, 30, 0).unwrap();
         let scene = Scene { occ, tz: chrono_tz::UTC, now, clock, selected };
-        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(1180.0, 780.0));
+        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(width, 780.0));
         let mut shapes = Vec::new();
         for frame in 0..3 {
             let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
@@ -794,6 +803,26 @@ mod tests {
         let red = crate::frames::circles(&shapes).into_iter().filter(|c| c.fill == theme::today()).collect::<Vec<_>>();
         assert!(red.iter().any(|c| c.center.distance(today.center()) < 3.0), "today's number sits in a red circle");
         assert_eq!(crate::frames::text_color(&shapes, "21", today.center()), Some(Color32::WHITE));
+    }
+
+    #[test]
+    fn a_phone_width_week_header_stacks_the_weekday_over_the_date() {
+        for width in [360.0, 390.0] {
+            let (shapes, screen) = week_at(&[], None, Clock::H12, width);
+            let head: Vec<(String, Rect)> =
+                crate::frames::text_rects(&shapes, screen).into_iter().filter(|(_, r)| r.top() < 36.0).collect();
+            assert_eq!(head.len(), 14, "seven weekdays and seven dates at {width} px: {head:?}");
+            for (i, (a, ra)) in head.iter().enumerate() {
+                for (b, rb) in &head[i + 1..] {
+                    assert!(!ra.expand(1.0).intersects(*rb), "{a} and {b} collide at {width} px");
+                }
+            }
+            let column = (width - GUTTER) / 7.0;
+            for (_, rect) in &head {
+                let i = ((rect.center().x - GUTTER) / column).floor();
+                assert!(rect.left() >= GUTTER + i * column && rect.right() <= GUTTER + (i + 1.0) * column);
+            }
+        }
     }
 
     #[test]
