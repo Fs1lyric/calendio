@@ -214,6 +214,27 @@ mod tests {
         NaiveDate::from_ymd_opt(2026, 10, 19).unwrap().and_hms_opt(10, 0, 0).unwrap()
     }
     #[test]
+    fn preview_uses_twelve_hour_times() {
+        let context = egui::Context::default();
+        theme::apply(&context);
+        let mut quick = QuickAdd { open: true, text: "Planning today at 9am".into(), focus: false };
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 780.0));
+        let mut texts = Vec::new();
+        for _ in 0..4 {
+            let mut output =
+                context.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |_ui| {
+                    quick.show(&context, now(), chrono_tz::UTC);
+                });
+            texts = crate::frames::text_rects(&output.shapes, screen);
+            output.textures_delta.clear();
+        }
+        assert!(
+            texts.iter().any(|(text, _)| text.contains("9 – 10 AM")),
+            "preview uses the requested clock: {texts:?}"
+        );
+    }
+
+    #[test]
     fn tomorrow_and_duration_preserve_the_title() {
         let f = parse("Design review tomorrow at 14:30 for 45m", now(), chrono_tz::Asia::Dhaka).unwrap();
         assert_eq!(f.title, "Design review");

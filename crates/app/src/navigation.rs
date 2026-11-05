@@ -152,6 +152,38 @@ mod tests {
     use super::*;
     use chrono::Datelike;
     #[test]
+    fn today_panel_uses_twelve_hour_times() {
+        let context = egui::Context::default();
+        theme::apply(&context);
+        let now = NaiveDate::from_ymd_opt(2026, 1, 19).unwrap().and_hms_opt(8, 0, 0).unwrap();
+        let items = [TodayItem {
+            occurrence: Occurrence {
+                event_id: 1,
+                title: "Planning".into(),
+                notes: String::new(),
+                start: "2026-01-19T09:00:00Z".into(),
+                end: "2026-01-19T10:00:00Z".into(),
+                all_day: false,
+                color: None,
+                reminder_minutes: None,
+                booking_id: None,
+                original_start: None,
+            },
+            details: EventDetails::default(),
+        }];
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(260.0, 780.0));
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            let mut output = context.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+                today_agenda(ui, &items, now, chrono_tz::UTC);
+            });
+            texts = crate::frames::text_rects(&output.shapes, screen);
+            output.textures_delta.clear();
+        }
+        crate::frames::one(&texts, "9 – 10 AM");
+    }
+
+    #[test]
     fn mini_calendar_has_six_complete_monday_first_weeks() {
         let day = chrono::NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
         let days = month_days(day);

@@ -661,6 +661,61 @@ mod tests {
     use super::*;
     use crate::clock::Clock;
 
+    fn overview_frame(occ: &[Occurrence], year_view: bool) -> (Vec<egui::epaint::ClippedShape>, Rect) {
+        let context = egui::Context::default();
+        theme::Theme::AppleLight.apply(&context);
+        let now = NaiveDate::from_ymd_opt(2026, 1, 19).unwrap().and_hms_opt(9, 0, 0).unwrap();
+        let scene = Scene { occ, tz: chrono_tz::UTC, now, clock: Clock::H12, selected: None };
+        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(1180.0, 780.0));
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            let mut output = context.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+                if year_view {
+                    year(ui, &scene, now.date());
+                } else {
+                    agenda(ui, &scene);
+                }
+            });
+            output.textures_delta.clear();
+            shapes = output.shapes;
+        }
+        (shapes, screen)
+    }
+
+    #[test]
+    fn year_uses_plain_day_numbers_and_a_red_today_circle() {
+        let (shapes, screen) = overview_frame(&[], true);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let today = crate::frames::find(&texts, "19").into_iter().min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
+        assert!(crate::frames::circles(&shapes)
+            .iter()
+            .any(|c| c.fill == theme::today() && c.center.distance(today.center()) < 3.0));
+        assert_eq!(crate::frames::text_color(&shapes, "19", today.center()), Some(Color32::WHITE));
+        let ordinary =
+            crate::frames::find(&texts, "20").into_iter().min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
+        assert!(
+            !crate::frames::rects(&shapes)
+                .iter()
+                .any(|r| r.fill == theme::surface_2() && r.rect.contains(ordinary.center())),
+            "day numbers have no grey button tiles"
+        );
+    }
+
+    #[test]
+    fn agenda_aligns_titles_left_times_right_and_leads_with_calendar_colour() {
+        let blue = Color32::from_rgb(0x24, 0x57, 0xb2);
+        let occ = [event(1, "Planning", "2026-01-19T09:00:00Z", "2026-01-19T10:00:00Z", "#2457b2")];
+        let (shapes, screen) = overview_frame(&occ, false);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let title = crate::frames::one(&texts, "Planning");
+        let time = crate::frames::one(&texts, "9 – 10 AM");
+        assert!(title.left() < 50.0 && time.right() > 1100.0);
+        assert!((title.center().y - time.center().y).abs() < 3.0);
+        assert!(crate::frames::circles(&shapes)
+            .iter()
+            .any(|c| c.fill == blue && c.center.x < title.left() && (c.center.y - title.center().y).abs() < 3.0));
+    }
+
     #[test]
     fn year_marks_every_busy_day_and_respects_exclusive_midnight_ends() {
         let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
@@ -1066,11 +1121,14 @@ mod tests {
         let (shapes, screen) = month_frame(&[event(2, "Trip", "2026-10-23", "2026-10-25", "#af52de")]);
         let texts = crate::frames::text_rects(&shapes, screen);
         let trips = crate::frames::find(&texts, "Trip");
-        assert_eq!(trips.len(), 2, "the trip shows on both of its days");
+        assert_eq!(trips.len(), 1, "one joined pill labels the trip once");
         for trip in trips {
             let pill =
                 crate::frames::rects(&shapes).into_iter().find(|r| r.fill == purple && r.rect.contains(trip.center()));
-            assert!(pill.is_some(), "a solid pill behind the all-day title");
+            assert!(
+                pill.is_some_and(|p| p.rect.width() > screen.width() / 7.0 * 1.9),
+                "a joined solid pill spans both days"
+            );
             let ink = crate::frames::text_color(&shapes, "Trip", trip.center());
             assert_eq!(ink, Some(theme::event_colors(purple, true).title));
         }
