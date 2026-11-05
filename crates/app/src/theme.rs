@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn themes_resolve_and_follow_system() {
-        assert_eq!(Theme::ALL.len(), 9);
+        assert_eq!(Theme::ALL.len(), 11);
         for theme in Theme::ALL {
             assert_eq!(Theme::parse(theme.id()), theme);
             let p = theme.palette(false);
@@ -221,9 +221,61 @@ mod tests {
                 }
             }
         }
-        assert_eq!(Theme::System.palette(true).bg, Theme::Dark.palette(false).bg);
-        assert_eq!(Theme::System.palette(false).bg, Theme::White.palette(false).bg);
+        assert_eq!(Theme::System.palette(true).bg, Theme::AppleDark.palette(false).bg);
+        assert_eq!(Theme::System.palette(false).bg, Theme::AppleLight.palette(false).bg);
         assert_eq!(Theme::parse("unknown"), Theme::System);
+    }
+
+    fn rgb(n: u32) -> Color32 {
+        Color32::from_rgb((n >> 16) as u8, (n >> 8) as u8, n as u8)
+    }
+
+    #[test]
+    fn apple_themes_use_a_white_or_charcoal_canvas_hairlines_and_system_red() {
+        let light = Theme::AppleLight.palette(false);
+        assert_eq!((light.bg, light.line, light.today), (rgb(0xffffff), rgb(0xe5e5e5), rgb(0xff3b30)));
+        assert!(!light.dark);
+        let dark = Theme::AppleDark.palette(false);
+        assert_eq!((dark.bg, dark.line, dark.today), (rgb(0x1e1e1e), rgb(0x3a3a3a), rgb(0xff453a)));
+        assert!(dark.dark);
+        assert_eq!(Theme::parse("apple-light"), Theme::AppleLight);
+        assert_eq!(Theme::parse("apple-dark"), Theme::AppleDark);
+    }
+
+    #[test]
+    fn the_default_theme_is_apple_and_follows_the_system() {
+        assert_eq!(Theme::default().palette(false).bg, Theme::AppleLight.palette(false).bg);
+        assert_eq!(Theme::default().palette(true).bg, Theme::AppleDark.palette(false).bg);
+        assert_eq!(Theme::parse(""), Theme::default());
+    }
+
+    #[test]
+    fn apple_accent_and_danger_text_stay_readable() {
+        for theme in [Theme::AppleLight, Theme::AppleDark] {
+            let p = theme.palette(false);
+            for text in [p.accent, p.danger] {
+                for background in [p.bg, p.surface, p.surface_2] {
+                    let a = luminance(text);
+                    let b = luminance(background);
+                    let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+                    assert!(contrast >= 4.5, "{} accent/danger contrast is {contrast}", theme.label());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inter_is_the_ui_font_with_semibold_and_bold_weights() {
+        let ctx = egui::Context::default();
+        Theme::AppleLight.apply(&ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.label(egui::RichText::new("November").font(bold(28.0)));
+            ui.label(egui::RichText::new("Standup").font(semibold(12.0)));
+        });
+        let families = ctx.fonts(|f| f.definitions().families.clone());
+        assert_eq!(families[&egui::FontFamily::Proportional][0], "Inter");
+        assert_eq!(families[&egui::FontFamily::Name("semibold".into())][0], "Inter SemiBold");
+        assert_eq!(families[&egui::FontFamily::Name("bold".into())][0], "Inter Bold");
     }
 
     #[test]
