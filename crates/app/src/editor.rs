@@ -122,12 +122,19 @@ impl Editor {
                         ui.label(RichText::new(error).color(theme::danger()));
                     }
                 }
-                egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 140.0).max(120.0)).show(
+                // The fields scroll; Save and Cancel stay pinned below them so
+                // they are reachable however short the window is.
+                let mut entered = false;
+                egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 200.0).max(120.0)).show(
                     ui,
-                    |ui| {
-                        out = self.body(ui);
+                    |ui| match self.asking {
+                        Some(asking) => out = self.ask_scope(ui, asking),
+                        None => entered = self.fields(ui),
                     },
                 );
+                if out.is_none() && self.asking.is_none() {
+                    out = self.footer(ui, entered);
+                }
             });
         if out.is_none() && modal.should_close() && self.asking.is_none() {
             out = Some(Outcome::Close);
@@ -135,10 +142,8 @@ impl Editor {
         out
     }
 
-    fn body(&mut self, ui: &mut egui::Ui) -> Option<Outcome> {
-        if let Some(asking) = self.asking {
-            return self.ask_scope(ui, asking);
-        }
+    /// The event's fields. Returns whether Enter was pressed in the title.
+    fn fields(&mut self, ui: &mut egui::Ui) -> bool {
         let f = &mut self.form;
         let title = egui::TextEdit::singleline(&mut f.title)
             .hint_text("Add a title")
@@ -297,7 +302,11 @@ impl Editor {
             ui.add(egui::TextEdit::multiline(&mut f.notes).desired_rows(3).desired_width(f32::INFINITY));
             ui.end_row();
         });
+        entered
+    }
 
+    /// The error line and the Delete, Cancel and Save buttons.
+    fn footer(&mut self, ui: &mut egui::Ui, entered: bool) -> Option<Outcome> {
         if let Some(e) = &self.error {
             ui.add_space(6.0);
             ui.label(RichText::new(e).color(theme::danger()));
