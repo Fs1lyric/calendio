@@ -8,6 +8,12 @@ view in Xvfb on a synthetic database (`tests/screenshots.sh`, seeded by
 `crates/core/examples/demo_seed.rs`) and uploads PNGs. Read them with
 `gh run download <id> -n screenshots -D <scratch dir>`.
 
+Baseline: CI run 42012254019 (2026-11-05). The toolbar is three rows of grey
+buttons (view tabs, Booking, + New, Quick add, Search, Calendars, Import/export,
+Personal, Undo, Theme, Recovery & connections). The sidebar repeats the
+Year/Agenda/Day/Week/Month switch. The week view opens at 08:00 with that label
+cut in half.
+
 ## Steps (one or more commits each, test first where there is logic)
 
 1. **Apple theme** (`theme.rs`): `apple-light` / `apple-dark` themes. White or
