@@ -19,3 +19,18 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: python3 tests/identity.py
       - run: cargo test --workspace
+
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: >-
+          sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev
+          libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 libgl1-mesa-dri libegl1 xvfb imagemagick
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: bash tests/screenshots.sh screenshots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
