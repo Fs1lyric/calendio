@@ -97,23 +97,6 @@ fn event_block(ui: &Ui, rect: Rect, color: Color32, b: Block) {
     }
 }
 
-/// A rounded event chip with a coloured edge and clipped text. `notes` go under
-/// the lines, wrapped to the chip's width.
-fn chip(ui: &Ui, rect: Rect, color: Color32, lines: &[(String, f32, Color32)], notes: Option<&str>) {
-    let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    p.rect_filled(rect, CornerRadius::same(4), theme::soft(color));
-    p.rect_filled(Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height())), CornerRadius::same(2), color);
-    let mut y = rect.top() + 2.0;
-    for (text, size, c) in lines {
-        p.text(Pos2::new(rect.left() + 7.0, y), Align2::LEFT_TOP, text, font(*size), *c);
-        y += size + 3.0;
-    }
-    if let Some(notes) = notes {
-        let galley = p.layout(notes.to_owned(), font(11.0), theme::ink_2(), (rect.width() - 10.0).max(1.0));
-        p.galley(Pos2::new(rect.left() + 7.0, y), galley, theme::ink_2());
-    }
-}
-
 /// The smallest time-grid block with room for a line of notes under its title
 /// and time.
 const NOTES_MIN_H: f32 = 44.0;
@@ -139,6 +122,9 @@ fn with_notes(resp: egui::Response, notes: &str) -> egui::Response {
 
 // ---------- month ----------
 
+/// Apple's month: the date top-right (today white in a red circle), timed
+/// events as "● 9 AM Title" lines, all-day events as solid pills, and
+/// "+2 more" when a day runs out of room.
 pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
     let mut action = None;
     let days = grid::days(View::Month, anchor);
@@ -149,8 +135,8 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
     let painter = ui.painter().clone();
 
     for (i, name) in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].iter().enumerate() {
-        let x = full.left() + w * (i as f32 + 0.5);
-        painter.text(Pos2::new(x, full.top() + head / 2.0), Align2::CENTER_CENTER, name, font(12.0), theme::ink_3());
+        let x = full.left() + w * (i as f32 + 1.0) - 10.0;
+        painter.text(Pos2::new(x, full.top() + head / 2.0), Align2::RIGHT_CENTER, name, font(12.0), theme::ink_2());
     }
 
     for (i, &day) in days.iter().enumerate() {
@@ -160,28 +146,27 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
             egui::vec2(w, h),
         );
         let r = ui.interact(cell, Id::new(("cell", day)), Sense::click());
-        let fill = if r.hovered() { theme::surface() } else { theme::bg() };
-        painter.rect_filled(cell, 0.0, fill);
-        painter.rect_stroke(cell, 0.0, Stroke::new(0.5, theme::line()), StrokeKind::Inside);
+        if r.hovered() {
+            painter.rect_filled(cell, 0.0, theme::hover());
+        }
+        painter.rect_stroke(cell, 0.0, Stroke::new(1.0, theme::line()), StrokeKind::Inside);
         if r.clicked() {
             action = Some(Action::New { start: at(day, 9), end: at(day, 10), all_day: false });
         }
 
         let today = day == s.now.date();
         let in_month = day.month() == anchor.month();
-        let num_center = Pos2::new(cell.left() + 16.0, cell.top() + 14.0);
-        let num_rect = Rect::from_center_size(num_center, egui::vec2(24.0, 22.0));
-        if today {
+        let num_center = Pos2::new(cell.right() - 17.0, cell.top() + 15.0);
+        let (num_color, num_font) = if today {
             painter.circle_filled(num_center, 11.0, theme::today());
-        }
-        let num_color = if today {
-            theme::bg()
+            (Color32::WHITE, theme::semibold(13.0))
         } else if in_month {
-            theme::ink()
+            (theme::ink(), font(13.0))
         } else {
-            theme::ink_3()
+            (theme::ink_3(), font(13.0))
         };
-        painter.text(num_center, Align2::CENTER_CENTER, day.day(), font(13.0), num_color);
+        painter.text(num_center, Align2::CENTER_CENTER, day.day(), num_font, num_color);
+        let num_rect = Rect::from_center_size(num_center, egui::vec2(26.0, 24.0));
         if ui.interact(num_rect, Id::new(("num", day)), Sense::click()).on_hover_text("Open this day").clicked() {
             action = Some(Action::Goto(day));
         }
@@ -198,38 +183,62 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
             .collect();
         items.sort_by_key(|&k| (!s.occ[k].all_day, s.local_start(&s.occ[k])));
 
-        let line = 19.0;
-        let room = ((cell.height() - 30.0) / line).floor().max(1.0) as usize;
-        let hidden = items.len().saturating_sub(room);
-        for (n, &k) in items.iter().take(room).enumerate() {
-            let o = &s.occ[k];
-            let mut r = Rect::from_min_size(
-                Pos2::new(cell.left() + 4.0, cell.top() + 28.0 + line * n as f32),
+        let line = 18.0;
+        let top = cell.top() + 28.0;
+        let room = (((cell.bottom() - top - 2.0) / line).floor() as usize).max(1);
+        let (shown, more) = if items.len() > room { (room - 1, items.len() - (room - 1)) } else { (items.len(), 0) };
+        let slot = |n: usize| {
+            Rect::from_min_size(
+                Pos2::new(cell.left() + 4.0, top + line * n as f32),
                 egui::vec2(cell.width() - 8.0, line - 2.0),
-            );
-            // The last line makes room for "+n" when some don't fit.
-            if hidden > 0 && n + 1 == room {
-                let more = Rect::from_min_max(Pos2::new(r.right() - 30.0, r.top()), r.max);
-                r.max.x -= 32.0;
-                painter.text(more.center(), Align2::CENTER_CENTER, format!("+{hidden}"), font(12.0), theme::ink_2());
-                let resp = ui.interact(more, Id::new(("more", day)), Sense::click());
-                if resp.on_hover_text(format!("{hidden} more")).clicked() {
-                    action = Some(Action::Goto(day));
-                }
-            }
+            )
+        };
+        for (n, &k) in items.iter().take(shown).enumerate() {
+            let o = &s.occ[k];
+            let r = slot(n);
             let color = theme::hex(o.color.as_deref());
-            let text = if o.all_day {
-                o.title.clone()
+            let clip = painter.with_clip_rect(r.intersect(ui.clip_rect()));
+            if o.all_day || s.is_selected(o) {
+                let c = theme::event_colors(color, true);
+                clip.rect_filled(r, CornerRadius::same(4), c.fill);
+                let text = if o.all_day { o.title.clone() } else { timed_label(s, o) };
+                clip.text(Pos2::new(r.left() + 6.0, r.center().y), Align2::LEFT_CENTER, text, font(12.0), c.title);
             } else {
-                format!("{} {}", grid::local(&o.start, s.tz).format("%H:%M"), o.title)
-            };
-            chip(ui, r, color, &[(text, 12.0, theme::ink())], None);
+                clip.circle_filled(Pos2::new(r.left() + 5.0, r.center().y), 3.5, color);
+                let start = s.clock.short(grid::local(&o.start, s.tz).time());
+                let mut job = egui::text::LayoutJob::default();
+                let section = |color| egui::TextFormat { font_id: font(12.0), color, ..Default::default() };
+                job.append(&format!("{start} "), 0.0, section(theme::ink_2()));
+                job.append(&o.title, 0.0, section(theme::ink()));
+                let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
+                let at = Pos2::new(r.left() + 13.0, r.center().y - galley.size().y / 2.0);
+                clip.galley(at, galley, theme::ink());
+            }
             if with_notes(ui.interact(r, Id::new(("mchip", k, day)), Sense::click()), &o.notes).clicked() {
                 action = Some(Action::Open(k));
             }
         }
+        if more > 0 {
+            let r = slot(shown);
+            let label = format!("+{more} more");
+            painter.text(
+                Pos2::new(r.left() + 6.0, r.center().y),
+                Align2::LEFT_CENTER,
+                label,
+                font(12.0),
+                theme::ink_2(),
+            );
+            if ui.interact(r, Id::new(("more", day)), Sense::click()).on_hover_text("Open this day").clicked() {
+                action = Some(Action::Goto(day));
+            }
+        }
     }
     action
+}
+
+/// "9 AM Title" for a timed event in the month grid.
+fn timed_label(s: &Scene, o: &Occurrence) -> String {
+    format!("{} {}", s.clock.short(grid::local(&o.start, s.tz).time()), o.title)
 }
 
 // ---------- week and day ----------
