@@ -405,7 +405,7 @@ impl App {
     fn keys(&mut self, ctx: &egui::Context) {
         if self.editor.is_none()
             && !self.quick_add.is_open()
-            && ctx.input(|i| i.modifiers.command && i.key_pressed(Key::K))
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::K))
         {
             self.workspace.open_search();
             self.booking = None;
@@ -417,13 +417,13 @@ impl App {
         if self.editor.is_some() || ctx.memory(|m| m.focused().is_some()) {
             return;
         }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Z)) {
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::Z)) {
             self.undo();
             return;
         }
         // Ctrl+1–4 (⌘ on a Mac): Day, Week, Month, Year, like Apple Calendar.
         let views = [Key::Num1, Key::Num2, Key::Num3, Key::Num4];
-        if let Some(i) = views.iter().position(|&k| ctx.input(|i| i.modifiers.command && i.key_pressed(k))) {
+        if let Some(i) = views.iter().position(|&k| ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, k))) {
             self.go(VIEWS[i].0, self.anchor);
             return;
         }
