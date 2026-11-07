@@ -800,9 +800,13 @@ mod tests {
         let texts = crate::frames::text_rects(&shapes, screen);
         // January 19: January is the first card, so its 19 is on the top row and furthest left
         // (February's 19 shares that row, a fraction of a pixel apart).
-        let first_card =
-            |a: &Rect, b: &Rect| (a.top().round(), a.left()).partial_cmp(&(b.top().round(), b.left())).unwrap();
-        let today = crate::frames::find(&texts, "19").into_iter().min_by(first_card).unwrap();
+        let nineteens = crate::frames::find(&texts, "19");
+        let top_row = nineteens.iter().map(|r| r.top()).fold(f32::INFINITY, f32::min);
+        let today = nineteens
+            .into_iter()
+            .filter(|r| r.top() < top_row + 4.0)
+            .min_by(|a, b| a.left().total_cmp(&b.left()))
+            .unwrap();
         assert!(crate::frames::circles(&shapes)
             .iter()
             .any(|c| c.fill == theme::today() && c.center.distance(today.center()) < 3.0));
