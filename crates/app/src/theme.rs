@@ -276,19 +276,64 @@ fn readable_shade(colour: Color32, on: Color32, toward: Color32) -> Color32 {
     }
 }
 
-/// Event colours, stored on the event as `#rrggbb`.
-pub const SWATCHES: [(&str, &str); 7] = [
+/// Time block colours, stored on the event as `#rrggbb`: Apple Calendar's
+/// thirteen system colours first, then the softer pastels kept from before so
+/// blocks already coloured with them still match a swatch.
+pub const SWATCHES: [(&str, &str); 20] = [
+    ("Red", "#ff3b30"),
+    ("Orange", "#ff9500"),
+    ("Yellow", "#ffcc00"),
+    ("Green", "#34c759"),
+    ("Mint", "#00c7be"),
+    ("Teal", "#30b0c7"),
+    ("Cyan", "#32ade6"),
+    ("Blue", "#007aff"),
+    ("Indigo", "#5856d6"),
+    ("Purple", "#af52de"),
+    ("Pink", "#ff2d55"),
+    ("Brown", "#a2845e"),
+    ("Graphite", "#8e8e93"),
     ("Lilac", "#f4c3e8"),
-    ("Pink", "#f48aab"),
-    ("Mint", "#a5e0ca"),
+    ("Blush", "#f48aab"),
+    ("Seafoam", "#a5e0ca"),
     ("Cream", "#f5dfb4"),
-    ("Blue", "#89b3f9"),
-    ("Teal", "#96dfcd"),
+    ("Sky", "#89b3f9"),
+    ("Aqua", "#96dfcd"),
     ("Slate", "#b2bad1"),
 ];
 
+/// How many of [`SWATCHES`] are Apple's system colours.
+pub const VIVID: usize = 13;
+
+/// Apple's dark-mode variant of each system colour, which it swaps in on a
+/// dark canvas so blocks stay bright without glaring.
+const DARK_VARIANTS: [(u32, u32); VIVID] = [
+    (0xff3b30, 0xff453a),
+    (0xff9500, 0xff9f0a),
+    (0xffcc00, 0xffd60a),
+    (0x34c759, 0x30d158),
+    (0x00c7be, 0x63e6e2),
+    (0x30b0c7, 0x40c8e0),
+    (0x32ade6, 0x64d2ff),
+    (0x007aff, 0x0a84ff),
+    (0x5856d6, 0x5e5ce6),
+    (0xaf52de, 0xbf5af2),
+    (0xff2d55, 0xff375f),
+    (0xa2845e, 0xac8e68),
+    (0x8e8e93, 0x98989d),
+];
+
+/// A stored `#rrggbb` as the colour to paint: Apple's dark variant on a dark
+/// canvas, otherwise as stored.
 pub fn hex(s: Option<&str>) -> Color32 {
-    s.and_then(|s| Color32::from_hex(s).ok()).unwrap_or(Color32::from_rgb(0x89, 0xb3, 0xf9))
+    let c = s.and_then(|s| Color32::from_hex(s).ok()).unwrap_or(Color32::from_rgb(0x89, 0xb3, 0xf9));
+    if is_dark() {
+        let n = u32::from(c.r()) << 16 | u32::from(c.g()) << 8 | u32::from(c.b());
+        if let Some(&(_, d)) = DARK_VARIANTS.iter().find(|(l, _)| *l == n) {
+            return Color32::from_rgb((d >> 16) as u8, (d >> 8) as u8, d as u8);
+        }
+    }
+    c
 }
 
 /// A colour faded into the background, for event fills.
@@ -432,6 +477,17 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn apple_colours_switch_to_their_dark_variants_on_a_dark_canvas() {
+        Theme::AppleLight.apply(&egui::Context::default());
+        assert_eq!(hex(Some("#ff3b30")), rgb(0xff3b30));
+        assert_eq!(hex(Some("#007AFF")), rgb(0x007aff));
+        Theme::AppleDark.apply(&egui::Context::default());
+        assert_eq!(hex(Some("#ff3b30")), rgb(0xff453a));
+        assert_eq!(hex(Some("#007aff")), rgb(0x0a84ff));
+        assert_eq!(hex(Some("#f5dfb4")), rgb(0xf5dfb4), "pastels and custom colours stay as stored");
     }
 
     #[test]
