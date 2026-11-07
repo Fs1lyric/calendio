@@ -153,6 +153,39 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
         painter.text(Pos2::new(x, full.top() + head / 2.0), Align2::RIGHT_CENTER, name, font(12.0), theme::ink_2());
     }
 
+    // All-day events become one pill per week row, packed into lanes at the
+    // top of the row, like Apple's: (occurrence, first column, end column, lane).
+    let line = 18.0;
+    let room = (((h - 28.0 - 2.0) / line).floor() as usize).max(1);
+    let rows: Vec<Vec<(usize, usize, usize, usize)>> = (0..6)
+        .map(|row| {
+            let first = days[row * 7];
+            let spans: Vec<(usize, i64, i64)> = (0..s.occ.len())
+                .filter(|&k| s.occ[k].all_day)
+                .filter_map(|k| {
+                    let o = &s.occ[k];
+                    let a = (o.start.parse::<NaiveDate>().ok()? - first).num_days().max(0);
+                    let b = (o.end.parse::<NaiveDate>().ok()? - first).num_days().min(7);
+                    (a < b).then_some((k, a, b))
+                })
+                .collect();
+            let lanes = grid::pack(&spans.iter().map(|&(_, a, b)| (a, b)).collect::<Vec<_>>());
+            spans.iter().zip(lanes).map(|(&(k, a, b), l)| (k, a as usize, b as usize, l.column)).collect()
+        })
+        .collect();
+    // How many lanes each row shows; one slot is kept for "+N more" if they overflow.
+    let shown_lanes: Vec<usize> = rows
+        .iter()
+        .map(|spans| {
+            let lanes = spans.iter().map(|t| t.3 + 1).max().unwrap_or(0);
+            if lanes <= room {
+                lanes
+            } else {
+                room.saturating_sub(1)
+            }
+        })
+        .collect();
+
     for (i, &day) in days.iter().enumerate() {
         let (row, col) = (i / 7, i % 7);
         let cell = Rect::from_min_size(
@@ -194,22 +227,20 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
             action = Some(Action::Goto(day));
         }
 
-        let mut items: Vec<usize> = (0..s.occ.len())
-            .filter(|&k| {
-                let o = &s.occ[k];
-                if o.all_day {
-                    grid::covers(o, day)
-                } else {
-                    grid::span_on(o, day, s.tz).is_some()
-                }
-            })
-            .collect();
-        items.sort_by_key(|&k| (!s.occ[k].all_day, s.local_start(&s.occ[k])));
+        let mut items: Vec<usize> =
+            (0..s.occ.len()).filter(|&k| !s.occ[k].all_day && grid::span_on(&s.occ[k], day, s.tz).is_some()).collect();
+        items.sort_by_key(|&k| s.local_start(&s.occ[k]));
 
-        let line = 18.0;
-        let top = cell.top() + 28.0;
-        let room = (((cell.bottom() - top - 2.0) / line).floor() as usize).max(1);
-        let (shown, more) = if items.len() > room { (room - 1, items.len() - (room - 1)) } else { (items.len(), 0) };
+        let lanes = shown_lanes[row];
+        let hidden = rows[row].iter().filter(|t| t.3 >= lanes && t.1 <= col && col < t.2).count();
+        let top = cell.top() + 28.0 + line * lanes as f32;
+        let room = room - lanes;
+        let (shown, more) = if items.len() <= room && hidden == 0 {
+            (items.len(), 0)
+        } else {
+            let fit = items.len().min(room.saturating_sub(1));
+            (fit, items.len() - fit + hidden)
+        };
         let slot = |n: usize| {
             Rect::from_min_size(
                 Pos2::new(cell.left() + 4.0, top + line * n as f32),
@@ -221,11 +252,16 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
             let r = slot(n);
             let color = theme::hex(o.color.as_deref());
             let clip = painter.with_clip_rect(r.intersect(ui.clip_rect()));
-            if o.all_day || s.is_selected(o) {
+            if s.is_selected(o) {
                 let c = theme::event_colors(color, true);
                 clip.rect_filled(r, CornerRadius::same(4), c.fill);
-                let text = if o.all_day { o.title.clone() } else { timed_label(s, o) };
-                clip.text(Pos2::new(r.left() + 6.0, r.center().y), Align2::LEFT_CENTER, text, font(12.0), c.title);
+                clip.text(
+                    Pos2::new(r.left() + 6.0, r.center().y),
+                    Align2::LEFT_CENTER,
+                    timed_label(s, o),
+                    font(12.0),
+                    c.title,
+                );
             } else {
                 clip.circle_filled(Pos2::new(r.left() + 5.0, r.center().y), 3.5, color);
                 let start = s.clock.short(grid::local(&o.start, s.tz).time());
@@ -259,6 +295,27 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
             if ui.interact(r, Id::new(("more", day)), Sense::click()).on_hover_text("Open this day").clicked() {
                 action = Some(Action::Goto(day));
             }
+        }
+    }
+
+    // The joined pills, drawn last so they sit over every cell they cross.
+    for (row, spans) in rows.iter().enumerate() {
+        for &(k, a, b, lane) in spans.iter().filter(|t| t.3 < shown_lanes[row]) {
+            let o = &s.occ[k];
+            let top = full.top() + head + h * row as f32 + 28.0 + line * lane as f32;
+            let r = Rect::from_min_max(
+                Pos2::new(full.left() + w * a as f32 + 4.0, top),
+                Pos2::new(full.left() + w * b as f32 - 4.0, top + line - 2.0),
+            );
+            let c = theme::event_colors(theme::hex(o.color.as_deref()), true);
+            let clip = painter.with_clip_rect(r.intersect(ui.clip_rect()));
+            clip.rect_filled(r, CornerRadius::same(4), c.fill);
+            clip.text(Pos2::new(r.left() + 6.0, r.center().y), Align2::LEFT_CENTER, &o.title, font(12.0), c.title);
+            let resp = with_notes(ui.interact(r, Id::new(("mpill", k, row)), Sense::click()), &o.notes);
+            if resp.clicked() {
+                action = Some(Action::Open(k));
+            }
+            colour_menu(&resp, o, k, &mut action);
         }
     }
     action
@@ -563,9 +620,9 @@ pub fn agenda(ui: &mut Ui, s: &Scene) -> Option<Action> {
             let start = s.local_start(o);
             let day = start.format("%A, %-d %B").to_string();
             if day != previous {
-                ui.add_space(18.0);
-                ui.label(egui::RichText::new(&day).strong().size(18.0));
-                ui.separator();
+                ui.add_space(if previous.is_empty() { 6.0 } else { 18.0 });
+                ui.label(egui::RichText::new(&day).font(theme::semibold(15.0)).color(theme::ink()));
+                ui.add_space(2.0);
                 previous = day;
             }
             let time = if o.all_day {
@@ -573,13 +630,25 @@ pub fn agenda(ui: &mut Ui, s: &Scene) -> Option<Action> {
             } else {
                 s.clock.range(start.time(), grid::local(&o.end, s.tz).time())
             };
-            let resp = ui
-                .add_sized(
-                    [ui.available_width(), 54.0],
-                    egui::Button::new(format!("{time}    {}", o.title))
-                        .fill(theme::soft(theme::hex(o.color.as_deref()))),
-                )
-                .on_hover_text(&o.notes);
+            // Apple's list row: a colour dot, the title in ink on the left, the
+            // time on the right, a hairline under it, and a soft tint on hover.
+            let (row, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), Sense::click());
+            let p = ui.painter();
+            if resp.hovered() || s.is_selected(o) {
+                p.rect_filled(row, CornerRadius::same(6), theme::hover());
+            }
+            let y = row.center().y;
+            p.circle_filled(Pos2::new(row.left() + 12.0, y), 4.5, theme::hex(o.color.as_deref()));
+            let title_clip =
+                p.with_clip_rect(Rect::from_min_max(row.min, Pos2::new(row.right() - 150.0, row.bottom())));
+            title_clip.text(Pos2::new(row.left() + 26.0, y), Align2::LEFT_CENTER, &o.title, font(14.0), theme::ink());
+            p.text(Pos2::new(row.right() - 10.0, y), Align2::RIGHT_CENTER, time, font(13.0), theme::ink_2());
+            let ppp = ui.ctx().pixels_per_point();
+            p.line_segment(
+                [Pos2::new(row.left() + 26.0, row.bottom()), Pos2::new(row.right(), row.bottom())],
+                Stroke::new(1.0 / ppp, theme::line()),
+            );
+            let resp = with_notes(resp, &o.notes);
             if resp.clicked() {
                 action = Some(Action::Open(index));
             }
@@ -620,50 +689,74 @@ pub fn year(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
         egui::Grid::new("year-grid").num_columns(columns).spacing([18.0, 20.0]).show(ui, |ui| {
             for month in 1..=12 {
                 let first = NaiveDate::from_ymd_opt(anchor.year(), month, 1).expect("valid month");
-                egui::Frame::new().fill(theme::surface()).inner_margin(12.0).corner_radius(8).show(ui, |ui| {
+                // Apple's year: no tiles, the month name in red for the current
+                // month, plain day numbers, today white in a red circle, and a
+                // small dot under days that have events.
+                egui::Frame::new().inner_margin(12.0).show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.set_width(card_width);
-                        ui.spacing_mut().button_padding = egui::vec2(2.0, 2.0);
-                        ui.spacing_mut().interact_size = egui::vec2(24.0, 24.0);
-                        ui.label(egui::RichText::new(first.format("%B").to_string()).strong().size(17.0));
-                        egui::Grid::new(("mini-month", month)).num_columns(7).spacing([2.0, 2.0]).show(ui, |ui| {
-                            for name in ["M", "T", "W", "T", "F", "S", "S"] {
-                                ui.label(egui::RichText::new(name).small().color(theme::ink_3()));
+                        let current = month == s.now.month() && anchor.year() == s.now.year();
+                        let name_colour = if current { theme::today() } else { theme::ink() };
+                        ui.label(
+                            egui::RichText::new(first.format("%B").to_string())
+                                .font(theme::semibold(17.0))
+                                .color(name_colour),
+                        );
+                        ui.add_space(4.0);
+                        let size = if cell_width > 36.0 { 13.0 } else { 12.0 };
+                        let (head, _) = ui.allocate_exact_size(egui::vec2(cell_width * 7.0, 18.0), Sense::hover());
+                        for (i, name) in ["M", "T", "W", "T", "F", "S", "S"].iter().enumerate() {
+                            let x = head.left() + cell_width * (i as f32 + 0.5);
+                            ui.painter().text(
+                                Pos2::new(x, head.center().y),
+                                Align2::CENTER_CENTER,
+                                name,
+                                font(11.0),
+                                theme::ink_3(),
+                            );
+                        }
+                        let start = grid::week_start(first);
+                        let (body, _) =
+                            ui.allocate_exact_size(egui::vec2(cell_width * 7.0, 26.0 * 6.0), Sense::hover());
+                        for i in 0..42 {
+                            let day = start + Duration::days(i);
+                            if day.month() != month {
+                                continue;
                             }
-                            ui.end_row();
-                            let start = grid::week_start(first);
-                            for i in 0..42 {
-                                let day = start + Duration::days(i);
-                                if day.month() == month {
-                                    let has_events = busy.contains(&day);
-                                    let text =
-                                        if has_events { format!("{}·", day.day()) } else { day.day().to_string() };
-                                    let button =
-                                        egui::Button::new(egui::RichText::new(text).size(if cell_width > 36.0 {
-                                            14.0
-                                        } else {
-                                            12.0
-                                        }))
-                                        .selected(day == s.now.date());
-                                    if ui
-                                        .add_sized([cell_width, 25.0], button)
-                                        .on_hover_text(format!(
-                                            "{}{}",
-                                            day,
-                                            if has_events { " · Has events" } else { "" }
-                                        ))
-                                        .clicked()
-                                    {
-                                        action = Some(Action::Goto(day));
-                                    }
-                                } else {
-                                    ui.allocate_space(egui::vec2(cell_width, 25.0));
+                            let cell = Rect::from_min_size(
+                                Pos2::new(
+                                    body.left() + cell_width * (i % 7) as f32,
+                                    body.top() + 26.0 * (i / 7) as f32,
+                                ),
+                                egui::vec2(cell_width, 26.0),
+                            );
+                            let resp = ui.interact(cell, Id::new(("year-day", day)), Sense::click());
+                            let centre = Pos2::new(cell.center().x, cell.center().y - 1.0);
+                            let p = ui.painter();
+                            let is_today = day == s.now.date();
+                            let (ink, number_font) = if is_today {
+                                p.circle_filled(centre, 11.0, theme::today());
+                                (Color32::WHITE, theme::semibold(size))
+                            } else {
+                                if resp.hovered() {
+                                    p.circle_filled(centre, 11.0, theme::hover());
                                 }
-                                if i % 7 == 6 {
-                                    ui.end_row();
-                                }
+                                (theme::ink(), font(size))
+                            };
+                            p.text(centre, Align2::CENTER_CENTER, day.day(), number_font, ink);
+                            let has_events = busy.contains(&day);
+                            if has_events && !is_today {
+                                p.circle_filled(Pos2::new(centre.x, cell.bottom() - 2.5), 1.5, theme::ink_3());
                             }
-                        });
+                            let hover = format!(
+                                "{}{}",
+                                day.format("%A, %-d %B"),
+                                if has_events { " · Has events" } else { "" }
+                            );
+                            if resp.on_hover_text(hover).clicked() {
+                                action = Some(Action::Goto(day));
+                            }
+                        }
                     });
                 });
                 if (month as usize).is_multiple_of(columns) {

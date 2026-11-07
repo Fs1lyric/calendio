@@ -114,7 +114,13 @@ impl QuickAdd {
     pub fn is_open(&self) -> bool {
         self.open
     }
-    pub fn show(&mut self, ctx: &egui::Context, now: NaiveDateTime, tz: Tz) -> Option<Form> {
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        now: NaiveDateTime,
+        tz: Tz,
+        clock: crate::clock::Clock,
+    ) -> Option<Form> {
         if !self.open {
             return None;
         }
@@ -138,16 +144,17 @@ impl QuickAdd {
                     Ok(form) => {
                         ui.add_space(8.0);
                         ui.label(RichText::new(&form.title).strong());
-                        ui.label(format!(
-                            "{} · {} – {}",
-                            form.start.format("%a %-d %b %Y"),
-                            form.start.format("%H:%M"),
-                            form.end.format(if form.end.date() == form.start.date() {
-                                "%H:%M"
-                            } else {
-                                "%a %-d %b %H:%M"
-                            })
-                        ));
+                        let day = form.start.format("%a %-d %b %Y");
+                        ui.label(if form.end.date() == form.start.date() {
+                            format!("{day} · {}", clock.range(form.start.time(), form.end.time()))
+                        } else {
+                            format!(
+                                "{day} · {} – {} {}",
+                                clock.short(form.start.time()),
+                                form.end.format("%a %-d %b"),
+                                clock.short(form.end.time())
+                            )
+                        });
                         ui.label(RichText::new(tz.to_string()).small().color(theme::ink_3()));
                     }
                     Err(message) if !self.text.trim().is_empty() => {
@@ -223,7 +230,7 @@ mod tests {
         for _ in 0..4 {
             let mut output =
                 context.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |_ui| {
-                    quick.show(&context, now(), chrono_tz::UTC);
+                    quick.show(&context, now(), chrono_tz::UTC, crate::clock::Clock::H12);
                 });
             texts = crate::frames::text_rects(&output.shapes, screen);
             output.textures_delta.clear();

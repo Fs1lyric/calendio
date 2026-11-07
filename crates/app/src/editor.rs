@@ -283,7 +283,10 @@ impl Editor {
             });
             ui.end_row();
 
-            ui.label(RichText::new("Colour").color(theme::ink_2()));
+            ui.vertical(|ui| {
+                ui.add_space(3.0);
+                ui.label(RichText::new("Colour").color(theme::ink_2()));
+            });
             crate::swatches::picker(ui, &mut f.color, Some(calendar_colour));
             ui.end_row();
 

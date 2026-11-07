@@ -95,7 +95,13 @@ pub struct TodayItem {
     pub details: EventDetails,
 }
 
-pub fn today_agenda(ui: &mut egui::Ui, items: &[TodayItem], now: NaiveDateTime, tz: Tz) -> Option<Occurrence> {
+pub fn today_agenda(
+    ui: &mut egui::Ui,
+    items: &[TodayItem],
+    now: NaiveDateTime,
+    tz: Tz,
+    clock: crate::clock::Clock,
+) -> Option<Occurrence> {
     let mut selected = None;
     ui.add_space(12.0);
     ui.heading("Today");
@@ -112,9 +118,12 @@ pub fn today_agenda(ui: &mut egui::Ui, items: &[TodayItem], now: NaiveDateTime, 
             let times = if event.all_day {
                 "All day".into()
             } else {
-                let end = grid::local(&event.end, tz);
-                let end_format = if end.date() == now.date() { "%H:%M" } else { "%a %H:%M" };
-                format!("{} – {}", grid::local(&event.start, tz).format("%H:%M"), end.format(end_format))
+                let (start, end) = (grid::local(&event.start, tz), grid::local(&event.end, tz));
+                if end.date() == now.date() {
+                    clock.range(start.time(), end.time())
+                } else {
+                    format!("{} – {} {}", clock.short(start.time()), end.format("%a"), clock.short(end.time()))
+                }
             };
             egui::Frame::new()
                 .fill(theme::surface())
@@ -175,7 +184,7 @@ mod tests {
         let mut texts = Vec::new();
         for _ in 0..3 {
             let mut output = context.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
-                today_agenda(ui, &items, now, chrono_tz::UTC);
+                today_agenda(ui, &items, now, chrono_tz::UTC, crate::clock::Clock::H12);
             });
             texts = crate::frames::text_rects(&output.shapes, screen);
             output.textures_delta.clear();

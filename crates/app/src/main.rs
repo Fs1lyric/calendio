@@ -538,7 +538,7 @@ impl App {
             let selected = egui::Panel::right("today")
                 .resizable(false)
                 .default_size(260.0)
-                .show(ui, |ui| navigation::today_agenda(ui, &self.today, now, self.tz))
+                .show(ui, |ui| navigation::today_agenda(ui, &self.today, now, self.tz, self.clock))
                 .inner;
             if let Some(occurrence) = selected {
                 self.open_occurrence(&occurrence);
@@ -564,7 +564,7 @@ impl App {
         if self.workspace.dialogs(&ctx, &self.db, self.tz) {
             self.stale = true;
         }
-        if let Some(form) = self.quick_add.show(&ctx, self.now(), self.tz) {
+        if let Some(form) = self.quick_add.show(&ctx, self.now(), self.tz, self.clock) {
             self.editor = Some(self.make_editor(form, None));
         }
         self.editor_frame(&ctx);

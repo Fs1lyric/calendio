@@ -19,7 +19,7 @@ cargo build -q -p calendio
 cargo run -q -p calendio-core --example demo_seed
 
 display=:99
-Xvfb "$display" -screen 0 1180x780x24 -nolisten tcp &
+Xvfb "$display" -screen 0 1600x780x24 -nolisten tcp &
 xvfb=$!
 trap 'kill $xvfb 2>/dev/null; rm -rf "$scratch"' EXIT
 export DISPLAY=$display
@@ -50,5 +50,7 @@ for theme in light dark; do
         shoot "$view-$theme-390" 390 --view "$view" --theme "apple-$theme"
     done
 done
+# Wide enough for the sidebar's today panel.
+shoot week-light-1500 1500 --view week --theme apple-light
 
 ls "$out"
