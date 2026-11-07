@@ -231,8 +231,11 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
             (0..s.occ.len()).filter(|&k| !s.occ[k].all_day && grid::span_on(&s.occ[k], day, s.tz).is_some()).collect();
         items.sort_by_key(|&k| s.local_start(&s.occ[k]));
 
-        let lanes = shown_lanes[row];
-        let hidden = rows[row].iter().filter(|t| t.3 >= lanes && t.1 <= col && col < t.2).count();
+        // Pills keep their lane across the row, but a day only gives up the
+        // lanes a pill on that day actually uses.
+        let here = rows[row].iter().filter(|t| t.1 <= col && col < t.2);
+        let lanes = here.clone().map(|t| t.3 + 1).max().unwrap_or(0).min(shown_lanes[row]);
+        let hidden = here.filter(|t| t.3 >= shown_lanes[row]).count();
         let top = cell.top() + 28.0 + line * lanes as f32;
         let room = room - lanes;
         let (shown, more) = if items.len() <= room && hidden == 0 {
@@ -1317,6 +1320,19 @@ mod tests {
             let ink = crate::frames::text_color(&shapes, "Trip", trip.center());
             assert_eq!(ink, Some(theme::event_colors(purple, true).title));
         }
+    }
+
+    #[test]
+    fn days_without_a_pill_keep_their_room_for_timed_events() {
+        let occ = [
+            event(2, "Trip", "2026-10-23", "2026-10-25", "#af52de"),
+            event(3, "Gym", "2026-10-19T07:00:00Z", "2026-10-19T08:00:00Z", "#34c759"),
+        ];
+        let (shapes, screen) = month_frame(&occ);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let trip = crate::frames::one(&texts, "Trip");
+        let gym = crate::frames::one(&texts, "7 AM Gym");
+        assert!((gym.center().y - trip.center().y).abs() < 3.0, "Monday's first line sits level with Friday's pill");
     }
 
     #[test]
