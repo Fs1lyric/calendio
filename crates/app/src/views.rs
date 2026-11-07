@@ -798,14 +798,15 @@ mod tests {
     fn year_uses_plain_day_numbers_and_a_red_today_circle() {
         let (shapes, screen) = overview_frame(&[], true);
         let texts = crate::frames::text_rects(&shapes, screen);
-        // January 19: January is the first card, so its 19 is on the top row and furthest left
-        // (February's 19 shares that row, a fraction of a pixel apart).
+        // January 19, 2026 is a Monday, so it is the leftmost 19; October's 19 is
+        // also a Monday but on a lower card. (With four cards a row, April's 19
+        // sits higher than January's, so "topmost" would pick the wrong one.)
         let nineteens = crate::frames::find(&texts, "19");
-        let top_row = nineteens.iter().map(|r| r.top()).fold(f32::INFINITY, f32::min);
+        let monday_column = nineteens.iter().map(|r| r.left()).fold(f32::INFINITY, f32::min);
         let today = nineteens
             .into_iter()
-            .filter(|r| r.top() < top_row + 4.0)
-            .min_by(|a, b| a.left().total_cmp(&b.left()))
+            .filter(|r| r.left() < monday_column + 4.0)
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
             .unwrap();
         assert!(crate::frames::circles(&shapes)
             .iter()
