@@ -1299,8 +1299,11 @@ mod tests {
             let pill =
                 crate::frames::rects(&shapes).into_iter().find(|r| r.fill == purple && r.rect.contains(trip.center()));
             assert!(
-                pill.is_some_and(|p| p.rect.width() > screen.width() / 7.0 * 1.9),
-                "a joined solid pill spans both days"
+                pill.is_some_and(|p| {
+                    let column = screen.width() / 7.0;
+                    p.rect.width() > column * 1.9 && p.rect.width() < column * 2.1
+                }),
+                "a joined solid pill spans both days and stops before the exclusive end date"
             );
             let ink = crate::frames::text_color(&shapes, "Trip", trip.center());
             assert_eq!(ink, Some(theme::event_colors(purple, true).title));

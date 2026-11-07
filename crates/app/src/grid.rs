@@ -107,12 +107,6 @@ pub fn stamp(t: NaiveDateTime, tz: Tz) -> String {
     }
 }
 
-/// Whether an all-day occurrence covers `day` (its end date is exclusive).
-pub fn covers(o: &Occurrence, day: NaiveDate) -> bool {
-    let date = |s: &str| s.parse::<NaiveDate>().ok();
-    matches!((date(&o.start), date(&o.end)), (Some(a), Some(b)) if a <= day && day < b)
-}
-
 /// A timed occurrence's minutes on `day`, clipped to the day, if it touches it.
 pub fn span_on(o: &Occurrence, day: NaiveDate, tz: Tz) -> Option<(i64, i64)> {
     if o.all_day {
@@ -251,15 +245,6 @@ mod tests {
         let t = local("2026-10-15T03:30:00Z", DHAKA);
         assert_eq!(t.to_string(), "2026-10-15 09:30:00");
         assert_eq!(stamp(t, DHAKA), "2026-10-15T03:30:00Z");
-    }
-
-    #[test]
-    fn all_day_coverage_excludes_the_end_date() {
-        let o = occ("2026-10-15", "2026-10-17");
-        assert!(!covers(&o, d("2026-10-14")));
-        assert!(covers(&o, d("2026-10-15")));
-        assert!(covers(&o, d("2026-10-16")));
-        assert!(!covers(&o, d("2026-10-17")));
     }
 
     #[test]
