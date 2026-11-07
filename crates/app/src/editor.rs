@@ -5,7 +5,7 @@ use crate::grid::{self, View};
 use crate::theme;
 use calendio_core::db::{Event, Exception};
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
-use eframe::egui::{self, CornerRadius, Id, RichText, Stroke};
+use eframe::egui::{self, CornerRadius, Id, RichText};
 
 pub enum Outcome {
     Save(Save),

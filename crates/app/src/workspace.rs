@@ -361,6 +361,16 @@ impl Workspace {
     }
 }
 
+/// A calendar always has a colour, so the picker has no "calendar colour" swatch.
+fn colour_row(ui: &mut egui::Ui, colour: &mut String) {
+    let mut picked = Some(colour.clone());
+    if crate::swatches::picker(ui, &mut picked, None) {
+        if let Some(c) = picked {
+            *colour = c;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,15 +415,5 @@ mod tests {
             }
         }
         assert_eq!(db.all_events().unwrap().len(), 1);
-    }
-}
-
-/// A calendar always has a colour, so the picker has no "calendar colour" swatch.
-fn colour_row(ui: &mut egui::Ui, colour: &mut String) {
-    let mut picked = Some(colour.clone());
-    if crate::swatches::picker(ui, &mut picked, None) {
-        if let Some(c) = picked {
-            *colour = c;
-        }
     }
 }
