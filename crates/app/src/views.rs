@@ -798,7 +798,11 @@ mod tests {
     fn year_uses_plain_day_numbers_and_a_red_today_circle() {
         let (shapes, screen) = overview_frame(&[], true);
         let texts = crate::frames::text_rects(&shapes, screen);
-        let today = crate::frames::find(&texts, "19").into_iter().min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
+        // January 19: January is the first card, so its 19 is on the top row and furthest left
+        // (February's 19 shares that row, a fraction of a pixel apart).
+        let first_card =
+            |a: &Rect, b: &Rect| (a.top().round(), a.left()).partial_cmp(&(b.top().round(), b.left())).unwrap();
+        let today = crate::frames::find(&texts, "19").into_iter().min_by(first_card).unwrap();
         assert!(crate::frames::circles(&shapes)
             .iter()
             .any(|c| c.fill == theme::today() && c.center.distance(today.center()) < 3.0));
