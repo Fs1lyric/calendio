@@ -41,7 +41,7 @@ impl Workspace {
             manage_open: false,
             drafts: Vec::new(),
             new_name: String::new(),
-            new_color: "#346538".into(),
+            new_color: "#007aff".into(),
             transfer_open: false,
             path: String::new(),
             message: String::new(),
@@ -222,8 +222,8 @@ impl Workspace {
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut calendar.visible, "Visible");
                         ui.add(egui::TextEdit::singleline(&mut calendar.name).desired_width(150.0));
-                        ui.add(egui::TextEdit::singleline(&mut calendar.color).desired_width(85.0));
                     });
+                    colour_row(ui, &mut calendar.color);
                     ui.horizontal(|ui| {
                         if ui.button("Save calendar").clicked() {
                             match db.update_calendar(calendar.id, &calendar.name, &calendar.color, calendar.visible) {
@@ -267,8 +267,8 @@ impl Workspace {
                         .hint_text("Work, Family, Projects…")
                         .desired_width(240.0),
                 );
-                ui.add(egui::TextEdit::singleline(&mut self.new_color).desired_width(85.0));
             });
+            colour_row(ui, &mut self.new_color);
             if ui.button("Create calendar").clicked() {
                 match db.create_calendar(&self.new_name, &self.new_color) {
                     Ok(id) => {
@@ -405,5 +405,15 @@ mod tests {
             }
         }
         assert_eq!(db.all_events().unwrap().len(), 1);
+    }
+}
+
+/// A calendar always has a colour, so the picker has no "calendar colour" swatch.
+fn colour_row(ui: &mut egui::Ui, colour: &mut String) {
+    let mut picked = Some(colour.clone());
+    if crate::swatches::picker(ui, &mut picked, None) {
+        if let Some(c) = picked {
+            *colour = c;
+        }
     }
 }

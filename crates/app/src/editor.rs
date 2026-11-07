@@ -144,6 +144,8 @@ impl Editor {
 
     /// The event's fields. Returns whether Enter was pressed in the title.
     fn fields(&mut self, ui: &mut egui::Ui) -> bool {
+        let calendar_colour =
+            theme::hex(self.calendars.iter().find(|c| c.id == self.calendar_id).map(|c| c.color.as_str()));
         let f = &mut self.form;
         let title = egui::TextEdit::singleline(&mut f.title)
             .hint_text("Add a title")
@@ -282,20 +284,7 @@ impl Editor {
             ui.end_row();
 
             ui.label(RichText::new("Colour").color(theme::ink_2()));
-            ui.horizontal(|ui| {
-                for (name, hex) in theme::SWATCHES {
-                    let chosen = f.color.as_deref().unwrap_or(theme::SWATCHES[0].1) == hex;
-                    let (rect, r) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::click());
-                    let c = theme::hex(Some(hex));
-                    ui.painter().circle_filled(rect.center(), 8.0, c);
-                    if chosen {
-                        ui.painter().circle_stroke(rect.center(), 10.0, Stroke::new(1.5, theme::ink()));
-                    }
-                    if r.on_hover_text(name).clicked() {
-                        f.color = Some(hex.to_string());
-                    }
-                }
-            });
+            crate::swatches::picker(ui, &mut f.color, Some(calendar_colour));
             ui.end_row();
 
             ui.label(RichText::new("Notes").color(theme::ink_2()));

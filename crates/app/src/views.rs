@@ -29,6 +29,11 @@ pub enum Action {
         start: NaiveDateTime,
     },
     Goto(NaiveDate),
+    /// Give the event behind this occurrence a new colour; `None` is its calendar's.
+    Recolour {
+        index: usize,
+        colour: Option<String>,
+    },
 }
 
 pub struct Scene<'a> {
@@ -113,6 +118,15 @@ fn block_notes(notes: &str, height: f32) -> Option<&str> {
 }
 
 /// Adds the event's notes to a chip's response as its hover tooltip.
+/// Right-clicking a block opens Apple's colour menu; picking one recolours it.
+fn colour_menu(resp: &egui::Response, o: &Occurrence, index: usize, action: &mut Option<Action>) {
+    resp.context_menu(|ui| {
+        if let Some(colour) = crate::swatches::menu(ui, o.color.as_deref()) {
+            *action = Some(Action::Recolour { index, colour });
+        }
+    });
+}
+
 fn with_notes(resp: egui::Response, notes: &str) -> egui::Response {
     match hover_notes(notes) {
         Some(n) => resp.on_hover_text(n),
@@ -226,9 +240,11 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
                 let at = Pos2::new(r.left() + 13.0, r.center().y - galley.size().y / 2.0);
                 clip.galley(at, galley, theme::ink());
             }
-            if with_notes(ui.interact(r, Id::new(("mchip", k, day)), Sense::click()), &o.notes).clicked() {
+            let resp = with_notes(ui.interact(r, Id::new(("mchip", k, day)), Sense::click()), &o.notes);
+            if resp.clicked() {
                 action = Some(Action::Open(k));
             }
+            colour_menu(&resp, o, k, &mut action);
         }
         if more > 0 {
             let r = slot(shown);
@@ -345,9 +361,11 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
         let o = &s.occ[k];
         let block = Block { title: &o.title, time: None, notes: None, selected: s.is_selected(o), faded: false };
         event_block(ui, r, theme::hex(o.color.as_deref()), block);
-        if with_notes(ui.interact(r, Id::new(("achip", k)), Sense::click()), &o.notes).clicked() {
+        let resp = with_notes(ui.interact(r, Id::new(("achip", k)), Sense::click()), &o.notes);
+        if resp.clicked() {
             action = Some(Action::Open(k));
         }
+        colour_menu(&resp, o, k, &mut action);
     }
 
     // The hours.
@@ -462,6 +480,7 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
                 if resp.clicked() {
                     action = Some(Action::Open(k));
                 }
+                colour_menu(&resp, o, k, &mut action);
                 if resp.drag_started() {
                     if let Some(pos) = resp.interact_pointer_pos() {
                         let under = day.and_time(NaiveTime::MIN) + Duration::minutes(minute_at(pos));
@@ -554,17 +573,17 @@ pub fn agenda(ui: &mut Ui, s: &Scene) -> Option<Action> {
             } else {
                 s.clock.range(start.time(), grid::local(&o.end, s.tz).time())
             };
-            if ui
+            let resp = ui
                 .add_sized(
                     [ui.available_width(), 54.0],
                     egui::Button::new(format!("{time}    {}", o.title))
                         .fill(theme::soft(theme::hex(o.color.as_deref()))),
                 )
-                .on_hover_text(&o.notes)
-                .clicked()
-            {
+                .on_hover_text(&o.notes);
+            if resp.clicked() {
                 action = Some(Action::Open(index));
             }
+            colour_menu(&resp, o, index, &mut action);
         }
     });
     action
@@ -829,6 +848,67 @@ mod tests {
         clock: Clock,
     ) -> (Vec<egui::epaint::ClippedShape>, Rect) {
         week_at(occ, selected, clock, 1180.0)
+    }
+
+    #[test]
+    fn right_clicking_a_block_offers_every_colour_and_picking_one_recolours_it() {
+        let occ = [event(7, "Standup", "2026-10-21T09:00:00Z", "2026-10-21T10:00:00Z", "#007aff")];
+        let context = egui::Context::default();
+        theme::Theme::AppleLight.apply(&context);
+        let monday = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+        let now = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap().and_hms_opt(10, 30, 0).unwrap();
+        let scene = Scene { occ: &occ, tz: chrono_tz::UTC, now, clock: Clock::H24, selected: None };
+        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(1180.0, 780.0));
+        let mut frame = 0;
+        let mut run = |events: Vec<egui::Event>| {
+            let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+            let mut action = None;
+            let scroll = (frame == 0).then_some(8.0 * HOUR_PX);
+            frame += 1;
+            let mut output = context.run_ui(input, |ui| {
+                action = time_grid(ui, &grid::days(View::Week, monday), &scene, scroll);
+            });
+            output.textures_delta.clear();
+            (output.shapes, action)
+        };
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = run(Vec::new()).0;
+        }
+        let block = crate::frames::text_rects(&shapes, screen)
+            .into_iter()
+            .find(|(t, _)| t == "Standup")
+            .expect("the block is on screen")
+            .1;
+        let click = |pos, button, pressed| egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let at = block.center();
+        run(vec![egui::Event::PointerMoved(at)]);
+        run(vec![click(at, egui::PointerButton::Secondary, true)]);
+        run(vec![click(at, egui::PointerButton::Secondary, false)]);
+        let shapes = run(Vec::new()).0;
+        let texts = crate::frames::text_rects(&shapes, screen);
+        for (name, _) in theme::SWATCHES {
+            assert!(texts.iter().any(|(t, _)| t == name), "the menu lists {name}");
+        }
+        let blue = crate::frames::one(&texts, "Blue");
+        let checked = crate::frames::flat(&shapes).into_iter().any(|(_, s)| match s {
+            egui::Shape::Path(p) => p.points.iter().all(|q| (q.y - blue.center().y).abs() < 8.0 && q.x < blue.left()),
+            _ => false,
+        });
+        assert!(checked, "a check sits left of the current colour, Blue");
+        let orange = crate::frames::one(&texts, "Orange").center();
+        run(vec![egui::Event::PointerMoved(orange)]);
+        run(vec![click(orange, egui::PointerButton::Primary, true)]);
+        let (_, action) = run(vec![click(orange, egui::PointerButton::Primary, false)]);
+        match action {
+            Some(Action::Recolour { index: 0, colour }) => assert_eq!(colour.as_deref(), Some("#ff9500")),
+            _ => panic!("picking Orange recolours the block"),
+        }
     }
 
     fn week_at(

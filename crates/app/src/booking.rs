@@ -367,16 +367,7 @@ fn type_editor(ctx: &egui::Context, edit: &mut TypeEdit) -> Option<TypeOutcome> 
                 minutes(ui, &mut t.max_days_ahead, 1..=365, " days out");
                 ui.end_row();
                 label(ui, "Color");
-                ui.horizontal(|ui| {
-                    for (name, hex) in theme::SWATCHES {
-                        let picked = t.color.as_deref() == Some(hex);
-                        let (r, resp) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::click());
-                        ui.painter().circle_filled(r.center(), if picked { 9.0 } else { 7.0 }, theme::hex(Some(hex)));
-                        if resp.on_hover_text(name).clicked() {
-                            t.color = Some(hex.to_string());
-                        }
-                    }
-                });
+                crate::swatches::picker(ui, &mut t.color, None);
                 ui.end_row();
                 label(ui, "About");
                 ui.add(

@@ -10,6 +10,7 @@ mod navigation;
 mod quick_add;
 mod recovery_ui;
 mod setup;
+mod swatches;
 mod theme;
 mod views;
 mod workspace;
@@ -234,6 +235,28 @@ impl App {
                 .map(drop)
                 .map_err(|e| e.to_string())
         }) {
+            Ok(()) => self.stale = true,
+            Err(e) => self.error = Some(e),
+        }
+    }
+
+    /// Gives the event behind an occurrence a new colour. Colour belongs to the
+    /// whole series, so a repeating event changes everywhere, as in Apple Calendar.
+    fn recolour(&mut self, index: usize, colour: Option<String>) {
+        let Some(o) = self.occ.get(index) else {
+            self.stale = true;
+            return;
+        };
+        let Ok(Some(e)) = self.db.event(o.event_id) else { return };
+        // Straight from the stored event, so an edited occurrence's title or
+        // times never spill onto the rest of the series.
+        let mut input = e.input.clone();
+        input.color = colour;
+        let result = self.db.record_edit("change colour", Some(e.id), |db| {
+            db.update_event(e.id, &input)?;
+            Ok(e.id)
+        });
+        match result.map(drop).map_err(|e| e.to_string()) {
             Ok(()) => self.stale = true,
             Err(e) => self.error = Some(e),
         }
@@ -584,6 +607,7 @@ impl App {
             }
             Some(Action::Move { index, start }) => self.drop_at(index, start),
             Some(Action::Goto(day)) => self.go(View::Day, day),
+            Some(Action::Recolour { index, colour }) => self.recolour(index, colour),
             None => {}
         }
     }
@@ -780,6 +804,50 @@ mod tests {
 #[cfg(test)]
 mod calendar_edit_tests {
     use super::*;
+    #[test]
+    fn recolouring_a_block_changes_the_whole_series_and_nothing_else() {
+        let db = Db::open_in_memory().unwrap();
+        let input = calendio_core::db::EventInput {
+            title: "Gym".into(),
+            notes: String::new(),
+            start: "2026-10-19T09:00:00Z".into(),
+            end: "2026-10-19T10:00:00Z".into(),
+            all_day: false,
+            tz: "UTC".into(),
+            rrule: Some("FREQ=DAILY;COUNT=3".into()),
+            color: None,
+            reminder_minutes: None,
+        };
+        let id = db.create_event(&input).unwrap();
+        // The second day has its own title, which must stay on that day only.
+        db.set_exception(&calendio_core::db::Exception {
+            event_id: id,
+            original_start: "2026-10-20T09:00:00Z".into(),
+            cancelled: false,
+            title: Some("Gym (legs)".into()),
+            notes: None,
+            start: None,
+            end: None,
+        })
+        .unwrap();
+        let mut app = App::new(db, chrono_tz::UTC);
+        app.view = View::Week;
+        app.anchor = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+        app.stale = true;
+        app.reload();
+        let legs = app.occ.iter().position(|o| o.title == "Gym (legs)").expect("the edited day is shown");
+        app.recolour(legs, Some("#ff9500".into()));
+        let e = app.db.event(id).unwrap().unwrap();
+        assert_eq!(e.color.as_deref(), Some("#ff9500"));
+        assert_eq!((e.title.as_str(), e.start.as_str()), ("Gym", "2026-10-19T09:00:00Z"));
+        assert!(app.stale, "the calendar reloads");
+        app.reload();
+        assert!(app.occ.iter().all(|o| o.color.as_deref() == Some("#ff9500")), "every day of the series");
+
+        app.recolour(0, None);
+        assert_eq!(app.db.event(id).unwrap().unwrap().color, None, "back to the calendar's colour");
+    }
+
     #[test]
     fn moving_one_occurrence_does_not_silently_change_its_calendar() {
         let db = Db::open_in_memory().unwrap();
