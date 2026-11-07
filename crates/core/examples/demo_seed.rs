@@ -54,8 +54,18 @@ fn main() {
         (1, event("Dentist", "", at(d(9), 10, 0), at(d(9), 11, 0))),
         (work, event("Quarterly review", "", at(d(16), 14, 0), at(d(16), 16, 0))),
     ];
+    // A few blocks wear their own colour, the rest their calendar's.
+    let own = [
+        ("Focus time", "#ff9500"),
+        ("Read", "#5856d6"),
+        ("Lunch with Zara", "#ff2d55"),
+        ("Standup", "#00c7be"),
+        ("Dentist", "#ffcc00"),
+    ];
     for (calendar, input) in &events {
-        db.create_event_in_calendar(input, *calendar).unwrap();
+        let mut input = input.clone();
+        input.color = own.iter().find(|(t, _)| *t == input.title).map(|(_, c)| c.to_string());
+        db.create_event_in_calendar(&input, *calendar).unwrap();
     }
 
     let mut trip = event("Trip to Sylhet", "", d(4).to_string(), d(7).to_string());
