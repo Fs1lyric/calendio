@@ -4,7 +4,7 @@ use crate::{
     delivery::{random_secret, time},
     details::EventDetails,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -187,13 +187,46 @@ impl Db {
     pub fn backup_to(&self, path: &Path) -> Result<()> {
         copy_database(self.conn(), path)
     }
-    pub fn daily_backup(&self, directory: &Path, now: DateTime<Utc>) -> Result<()> {
+    /// Today's backup, made once per UTC day; returns its path either way.
+    pub fn daily_backup(&self, directory: &Path, now: DateTime<Utc>) -> Result<PathBuf> {
         std::fs::create_dir_all(directory).map_err(|_| invalid("Cannot create backup directory"))?;
         let path = directory.join(format!("calendio-{}.sqlite3", now.format("%Y-%m-%d")));
         if !path.exists() {
             self.backup_to(&path)?;
         }
-        Ok(())
+        Ok(path)
+    }
+    /// Deletes all but the newest `keep` daily backups. Manual saves, safety copies and
+    /// unrelated files are never touched. Returns how many files were removed.
+    pub fn prune_backups(directory: &Path, keep: usize) -> Result<usize> {
+        let mut daily = daily_files(directory);
+        daily.sort();
+        let excess = daily.len().saturating_sub(keep);
+        for (_, path) in &daily[..excess] {
+            std::fs::remove_file(path).map_err(|_| invalid("Cannot remove an old backup"))?;
+        }
+        Ok(excess)
+    }
+    /// Copies every daily backup the mirror folder lacks (a USB stick, a synced cloud
+    /// folder), then prunes the mirror to `keep`. Returns how many files were copied.
+    pub fn mirror_backups(source: &Path, mirror: &Path, keep: usize) -> Result<usize> {
+        std::fs::create_dir_all(mirror).map_err(|_| invalid("Cannot reach the backup mirror folder"))?;
+        let mut copied = 0;
+        for (_, path) in daily_files(source) {
+            let Some(name) = path.file_name() else { continue };
+            let target = mirror.join(name);
+            if target.exists() {
+                continue;
+            }
+            let temporary = Temp(mirror.join(format!(".calendio-{}.tmp", random_secret()?)));
+            std::fs::copy(&path, &temporary.0)
+                .and_then(|_| std::fs::File::open(&temporary.0)?.sync_all())
+                .and_then(|_| std::fs::rename(&temporary.0, &target))
+                .map_err(|_| invalid("Cannot copy a backup to the mirror folder"))?;
+            copied += 1;
+        }
+        Self::prune_backups(mirror, keep)?;
+        Ok(copied)
     }
     pub fn restore_backup(&mut self, source: &Path, safety: &Path) -> Result<()> {
         if self
@@ -225,5 +258,71 @@ impl Db {
         self.set_setting("google_sync_token", "")?;
         self.set_setting("reminders_checked", &time(Utc::now()))?;
         Ok(())
+    }
+}
+
+fn daily_files(directory: &Path) -> Vec<(NaiveDate, PathBuf)> {
+    list_backups(directory).into_iter().filter(|b| b.kind == BackupKind::Daily).map(|b| (b.date, b.path)).collect()
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BackupKind {
+    /// `calendio-YYYY-MM-DD.sqlite3`, written by the booking service once a day.
+    Daily,
+    /// `calendio-YYYY-MM-DD-HHMMSS.sqlite3`, from "Save backup now".
+    Manual,
+    /// `before-restore-YYYY-MM-DD-HHMMSS.sqlite3`, the safety copy a restore makes.
+    BeforeRestore,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct BackupFile {
+    pub path: PathBuf,
+    pub kind: BackupKind,
+    /// The UTC date in the file name.
+    pub date: NaiveDate,
+    /// The UTC time in the file name; daily backups have none.
+    pub time: Option<NaiveTime>,
+}
+fn parse_backup(path: PathBuf) -> Option<BackupFile> {
+    let stem = path.file_name()?.to_str()?.strip_suffix(".sqlite3")?;
+    let (kind, rest) = if let Some(rest) = stem.strip_prefix("before-restore-") {
+        (BackupKind::BeforeRestore, rest)
+    } else {
+        let rest = stem.strip_prefix("calendio-")?;
+        (if rest.len() == 10 { BackupKind::Daily } else { BackupKind::Manual }, rest)
+    };
+    if kind == BackupKind::Daily {
+        let date = NaiveDate::parse_from_str(rest, "%Y-%m-%d").ok()?;
+        return Some(BackupFile { path, kind, date, time: None });
+    }
+    let stamp = NaiveDateTime::parse_from_str(rest, "%Y-%m-%d-%H%M%S").ok()?;
+    Some(BackupFile { path, kind, date: stamp.date(), time: Some(stamp.time()) })
+}
+/// Every Calendio backup in `directory`, newest first.
+pub fn list_backups(directory: &Path) -> Vec<BackupFile> {
+    let Ok(entries) = std::fs::read_dir(directory) else { return Vec::new() };
+    let mut list: Vec<_> = entries.flatten().filter_map(|e| parse_backup(e.path())).collect();
+    // A timed copy from today sorts above today's daily file: it was taken later.
+    list.sort_by(|a, b| (b.date, b.time.is_some(), b.time, b.kind).cmp(&(a.date, a.time.is_some(), a.time, a.kind)));
+    list
+}
+/// "Today", "Yesterday", "Tue 3 Nov", plus the local time for timed copies.
+pub fn backup_label(backup: &BackupFile, now: DateTime<FixedOffset>, time: impl Fn(NaiveTime) -> String) -> String {
+    let local = backup.time.map(|t| now.offset().from_utc_datetime(&backup.date.and_time(t)).naive_local());
+    let date = local.map_or(backup.date, |l| l.date());
+    let today = now.date_naive();
+    let mut day = if date == today {
+        "Today".to_owned()
+    } else if Some(date) == today.pred_opt() {
+        "Yesterday".to_owned()
+    } else {
+        date.format("%a %-d %b").to_string()
+    };
+    if date.year() != today.year() && date != today && Some(date) != today.pred_opt() {
+        day.push_str(&date.format(" %Y").to_string());
+    }
+    match (backup.kind, local) {
+        (BackupKind::Manual, Some(l)) => format!("{day}, saved at {}", time(l.time())),
+        (BackupKind::BeforeRestore, Some(l)) => format!("{day}, before a restore at {}", time(l.time())),
+        _ => day,
     }
 }
