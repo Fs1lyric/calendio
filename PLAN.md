@@ -151,3 +151,23 @@ Already there: booker `google.rs` (windowed incremental pull, ETag-guarded write
    a minute; edit in Calendio → appears on the phone.
 
 Order: A, then B, then C (C waits on the user's credentials).
+
+## Finish line progress (2026-11-08, branch `finish-line`)
+- A done: `Db::prune_backups` (30), `Db::mirror_backups` + `backup_mirror` setting
+  (booker `backups.rs`, retries every 10 min), restore picker with "Today / Yesterday /
+  Tue 3 Nov" rows (`recovery::list_backups`, `backup_label`). Screenshot `recovery-light`.
+- B done: migration 7 (`subscription_url`, `last_fetched`, `etag`), core
+  `subscriptions.rs` (`create_subscription`, `replace_subscription`, read-only guard in
+  `record_edit`, unsubscribe drops events), booker `subscriptions.rs` (6 h / on demand via
+  `subscriptions_refresh`, ETag, 5 MB, 20 s, own task; feeds skipped by the Google push),
+  app: "New subscription…" in `…`, ↻ in sidebar, read-only editor, drags ignored. Demo
+  seed has a Holidays feed.
+- C code done: `~/.config/calendio/google.env` (core `config.rs`, install.sh template,
+  unit `EnvironmentFile`, booker loads it at start), `google_last_sync`, Recovery window
+  shows setup state / last sync / errors.
+- Fixed a flaky test (week-open test failed around 7 AM UTC: the now line hides "7 AM").
+- NOT VERIFIED YET: GitHub Actions stopped starting jobs (billing/spending limit) after
+  run 42458374149. That run: clippy green, app tests 107/108 (the flaky one), screenshots
+  fine; core + booker tests never ran. Next: get one green run, merge to main, install.
+- Left for the user: C1 (Google Cloud Desktop OAuth client → google.env), C4 (real
+  phone round trip).
