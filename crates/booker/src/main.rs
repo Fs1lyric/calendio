@@ -1,6 +1,7 @@
 //! calendio-booker: serves the public booking page and its JSON API from
 //! the same SQLite file the desktop app uses.
 
+mod backups;
 mod google;
 mod google_auth;
 mod providers;

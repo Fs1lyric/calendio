@@ -28,6 +28,7 @@ pub async fn run(state: Arc<State>) {
     }
     let mut last_google = Utc::now() - Duration::minutes(2);
     let mut last_backup = None;
+    let mut next_backup_try = chrono::DateTime::<Utc>::MIN_UTC;
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(10));
     loop {
         tick.tick().await;
@@ -35,23 +36,16 @@ pub async fn run(state: Arc<State>) {
         {
             let db = state.db.lock().unwrap();
             let _ = db.set_setting("booker_heartbeat", &now.to_rfc3339());
-            if last_backup != Some(now.date_naive()) {
-                let directory =
-                    std::env::var_os("CALENDIO_BACKUP_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| {
-                        calendio_core::db::Db::default_path()
-                            .parent()
-                            .unwrap_or(std::path::Path::new("."))
-                            .join("backups")
-                    });
-                match db.daily_backup(&directory, now) {
-                    Ok(()) => {
-                        last_backup = Some(now.date_naive());
-                        let _ = db.set_setting("backup_status", "Daily backup saved");
-                    }
-                    Err(error) => {
-                        let _ = db.set_setting("backup_status", &error.to_string());
-                    }
+            if last_backup != Some(now.date_naive()) && next_backup_try <= now {
+                let directory = crate::backups::directory();
+                let status = crate::backups::daily(&db, &directory, now);
+                if status.is_ok() {
+                    last_backup = Some(now.date_naive());
+                } else {
+                    // An unplugged mirror stick retries every 10 minutes, not every tick.
+                    next_backup_try = now + Duration::minutes(10);
                 }
+                let _ = db.set_setting("backup_status", &status.unwrap_or_else(|e| e));
             }
         }
         if let Some(sender) = &mail {
