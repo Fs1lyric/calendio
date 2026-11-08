@@ -137,7 +137,7 @@ fn with_notes(resp: egui::Response, notes: &str) -> egui::Response {
 // ---------- month ----------
 
 /// Apple's month: the date top-right (today white in a red circle), timed
-/// events as "● 9 AM Title" lines, all-day events as solid pills, and
+/// events as "● Title … 9 AM" lines, all-day events as solid pills, and
 /// "+2 more" when a day runs out of room.
 pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
     let mut action = None;
@@ -1351,10 +1351,15 @@ mod tests {
         let occ = [event(1, title, "2026-10-22T14:00:00Z", "2026-10-22T15:00:00Z", "#2457b2")];
         let (shapes, screen) = month_frame(&occ);
         let texts = crate::frames::text_rects(&shapes, screen);
-        let (cut, rect) = texts.iter().find(|(t, _)| t.starts_with("Quarterly")).expect("the title").clone();
-        assert!(cut.ends_with('…'), "cut short with an ellipsis, got {cut:?}");
+        // The galley keeps the full string; what shows is cut, so measure the ink.
+        let rect = texts.iter().find(|(t, _)| t == title).map(|(_, r)| *r).expect("the title");
         let time = crate::frames::one(&texts, "2 PM");
         assert!(rect.right() < time.left(), "the title stops before the time");
+        let elided = crate::frames::flat(&shapes).into_iter().any(|(_, s)| match s {
+            egui::Shape::Text(t) => t.galley.text() == title && t.galley.elided,
+            _ => false,
+        });
+        assert!(elided, "the title gives way with an ellipsis");
     }
 
     #[test]
@@ -1388,7 +1393,7 @@ mod tests {
         let (shapes, screen) = month_frame(&occ);
         let texts = crate::frames::text_rects(&shapes, screen);
         let trip = crate::frames::one(&texts, "Trip");
-        let gym = crate::frames::one(&texts, "7 AM Gym");
+        let gym = crate::frames::one(&texts, "Gym");
         assert!((gym.center().y - trip.center().y).abs() < 3.0, "Monday's first line sits level with Friday's pill");
     }
 
@@ -1403,7 +1408,7 @@ mod tests {
             .collect();
         let (shapes, screen) = month_frame(&occ);
         let texts = crate::frames::text_rects(&shapes, screen);
-        let shown = texts.iter().filter(|(t, _)| t.contains(" Busy ")).count();
+        let shown = texts.iter().filter(|(t, _)| t.starts_with("Busy ")).count();
         assert!((1..6).contains(&shown), "{shown} of 6 events fit");
         let more = format!("+{} more", 6 - shown);
         crate::frames::one(&texts, &more);
