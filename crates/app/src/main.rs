@@ -1276,7 +1276,9 @@ mod toolbar_tests {
     #[test]
     fn week_opens_on_the_working_day_not_at_midnight() {
         let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
-        app.go(View::Week, NaiveDate::from_ymd_opt(2026, 11, 5).unwrap());
+        // A week in the past: in this week the red now line would hide the hour label
+        // beside it, so around 7 AM UTC "7 AM" was missing and the test failed.
+        app.go(View::Week, NaiveDate::from_ymd_opt(2025, 11, 5).unwrap());
         let texts = render(&mut app, 1180.0, 780.0);
         assert!(find(&texts, "1 AM").is_empty(), "the small hours are scrolled away");
         assert_eq!(find(&texts, "7 AM").len(), 1, "seven in the morning is in view");
