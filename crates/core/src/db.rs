@@ -175,6 +175,11 @@ CREATE TRIGGER google_event_deleted BEFORE DELETE ON events BEGIN
  UPDATE google_events SET deleted=1 WHERE json_extract(local_uid,'$[0]')=OLD.calendar_id AND json_extract(local_uid,'$[1]') IN (SELECT uid FROM event_uids WHERE event_id=OLD.id);
 END;
 "#,
+    r#"
+ALTER TABLE calendars ADD COLUMN subscription_url TEXT;
+ALTER TABLE calendars ADD COLUMN last_fetched TEXT;
+ALTER TABLE calendars ADD COLUMN etag TEXT;
+"#,
 ];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

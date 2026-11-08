@@ -543,7 +543,8 @@ impl Db {
     pub fn import_ics(&self, calendar_id: i64, input: &str, floating_zone: &str) -> Result<ImportReport> {
         let fallback = floating_zone.parse::<Tz>().map_err(|_| bad("Unknown import timezone"))?;
         let (items, warnings) = parse(input, fallback)?;
-        let tx = self.conn().unchecked_transaction()?;
+        // A savepoint, so a subscription refresh can wrap the import in its own.
+        let tx = self.savepoint()?;
         if !self.calendars()?.iter().any(|c| c.id == calendar_id) {
             return Err(bad("Calendar does not exist"));
         }

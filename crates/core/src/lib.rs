@@ -8,3 +8,4 @@ pub mod delivery;
 pub mod details;
 pub mod ical;
 pub mod recovery;
+pub mod subscriptions;

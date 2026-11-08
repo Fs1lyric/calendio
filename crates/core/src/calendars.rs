@@ -56,6 +56,12 @@ impl Db {
             return Err(Error::Invalid("Personal is the default calendar and cannot be deleted".into()));
         }
         let tx = self.conn().unchecked_transaction()?;
+        // A feed's events belong to the feed: unsubscribing drops them.
+        tx.execute(
+            "DELETE FROM events WHERE calendar_id=?1
+             AND EXISTS (SELECT 1 FROM calendars WHERE id=?1 AND subscription_url IS NOT NULL)",
+            [id],
+        )?;
         tx.execute(
             "UPDATE event_uids SET uid=lower(hex(randomblob(16))) || '@calendio.local'
             WHERE calendar_id=?1 AND uid IN (SELECT uid FROM event_uids WHERE calendar_id=1)",
