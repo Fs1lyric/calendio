@@ -110,7 +110,11 @@ pub async fn run(state: Arc<State>) {
                             token,
                             calendar: std::env::var("CALENDIO_GOOGLE_CALENDAR_ID").unwrap_or_else(|_| "primary".into()),
                         };
-                        crate::google::sync(&state, &api, now).await.map(|s| {
+                        let synced = crate::google::sync(&state, &api, now).await;
+                        if synced.is_ok() {
+                            let _ = state.db.lock().unwrap().set_setting("google_last_sync", &now.to_rfc3339());
+                        }
+                        synced.map(|s| {
                             format!("Synced: {} pulled, {} pushed, {} conflict copies", s.pulled, s.pushed, s.conflicts)
                         })
                     }

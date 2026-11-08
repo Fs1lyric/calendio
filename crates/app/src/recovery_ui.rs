@@ -44,7 +44,7 @@ impl RecoveryUi {
                 self.backups(ui, db);
                 changed |= self.restore(ui, db, clock);
                 ui.separator();
-                self.connections(ui, db);
+                self.connections(ui, db, clock);
                 ui.separator();
                 ui.label(&self.message);
             });
@@ -152,14 +152,23 @@ impl RecoveryUi {
         });
         changed
     }
-    fn connections(&mut self, ui: &mut egui::Ui, db: &Db) {
+    fn connections(&mut self, ui: &mut egui::Ui, db: &Db, clock: Clock) {
         ui.heading("Connections");
         ui.label("Google Calendar");
-        ui.label(db.setting("google_status").ok().flatten().unwrap_or_else(|| "Not connected".into()));
+        let google = GoogleStatus {
+            configured: google_configured(),
+            status: db.setting("google_status").ok().flatten(),
+            last_sync: db.setting("google_last_sync").ok().flatten(),
+        };
+        let (line, last, error) = google.summary(Local::now().fixed_offset(), clock);
+        ui.label(if error { RichText::new(line).color(theme::danger()) } else { RichText::new(line) });
+        if let Some(last) = last {
+            note(ui, last);
+        }
         note(
             ui,
-            "Set your Desktop OAuth client credentials, then connect. \
-             The booking service synchronizes every minute while running.",
+            "The booking service synchronizes every minute while running. Credentials stay in \
+             ~/.config/calendio/google.env and the desktop keyring.",
         );
         if ui.button("Connect Google Calendar").clicked() {
             let command = std::env::current_exe().map(|p| p.with_file_name("calendio-booker"));
@@ -195,8 +204,66 @@ impl RecoveryUi {
         );
     }
 }
+/// Whether a Google Desktop client ID is set, in the environment or google.env.
+fn google_configured() -> bool {
+    std::env::var("CALENDIO_GOOGLE_CLIENT_ID").is_ok_and(|v| !v.trim().is_empty())
+        || calendio_core::config::read_env(&calendio_core::config::google_env_path())
+            .iter()
+            .any(|(k, v)| k == "CALENDIO_GOOGLE_CLIENT_ID" && !v.trim().is_empty())
+}
+/// What the booking service last wrote about Google, plus whether a client is set up.
+pub struct GoogleStatus {
+    pub configured: bool,
+    pub status: Option<String>,
+    pub last_sync: Option<String>,
+}
+impl GoogleStatus {
+    /// (headline, "Last synced …" line, headline is an error)
+    pub fn summary(&self, now: DateTime<FixedOffset>, clock: Clock) -> (String, Option<String>, bool) {
+        let last = self.last_sync.as_deref().and_then(|t| t.parse::<DateTime<Utc>>().ok()).map(|t| {
+            let local = t.with_timezone(now.offset());
+            let day = match (now.date_naive() - local.date_naive()).num_days() {
+                0 => "today".to_owned(),
+                1 => "yesterday".to_owned(),
+                _ => local.format("%a %-d %b").to_string(),
+            };
+            format!("Last synced {day} at {}", clock.short(local.time()))
+        });
+        let status = self.status.clone().unwrap_or_default();
+        let fine = status.is_empty()
+            || ["Synced", "Not connected", "Google Calendar connected"].iter().any(|ok| status.starts_with(ok));
+        if !self.configured && (status.is_empty() || status.starts_with("Not connected")) {
+            return ("Not set up: add a Desktop OAuth client to ~/.config/calendio/google.env".into(), last, false);
+        }
+        let headline = if status.is_empty() { "Not connected".to_owned() } else { status };
+        (headline, last, !fine)
+    }
+}
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn google_summary_shows_setup_last_sync_and_errors() {
+        let now = "2026-11-08T22:00:00+06:00".parse().unwrap();
+        let status = |configured: bool, status: Option<&str>, last: Option<&str>| GoogleStatus {
+            configured,
+            status: status.map(str::to_owned),
+            last_sync: last.map(str::to_owned),
+        };
+        let (line, last, error) = status(false, None, None).summary(now, Clock::H12);
+        assert!(line.starts_with("Not set up") && last.is_none() && !error);
+        let (line, _, error) = status(true, Some("Not connected"), None).summary(now, Clock::H12);
+        assert_eq!((line.as_str(), error), ("Not connected", false));
+        let (line, last, error) =
+            status(true, Some("Synced: 2 pulled, 1 pushed, 0 conflict copies"), Some("2026-11-08T15:41:00+00:00"))
+                .summary(now, Clock::H12);
+        assert!(line.starts_with("Synced") && !error);
+        assert_eq!(last.as_deref(), Some("Last synced today at 9:41 PM"));
+        let (line, last, error) = status(true, Some("Google token refresh failed"), Some("2026-11-07T03:00:00+00:00"))
+            .summary(now, Clock::H24);
+        assert_eq!((line.as_str(), error), ("Google token refresh failed", true));
+        assert_eq!(last.as_deref(), Some("Last synced yesterday at 09:00"));
+    }
+
     use super::*;
     #[test]
     fn restore_rows_follow_the_clock_and_list_newest_first() {
