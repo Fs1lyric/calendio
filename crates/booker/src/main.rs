@@ -212,6 +212,13 @@ fn organizer_tz(db: &Db) -> Tz {
 }
 
 fn main() {
+    // Before any thread starts: values already in the environment (systemd's
+    // EnvironmentFile, a shell) win over the file.
+    for (key, value) in calendio_core::config::read_env(&calendio_core::config::google_env_path()) {
+        if key.starts_with("CALENDIO_GOOGLE_") && std::env::var_os(&key).is_none() {
+            std::env::set_var(key, value);
+        }
+    }
     if std::env::args().nth(1).as_deref() == Some("--google-connect") {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
         let result = runtime.block_on(google_auth::connect());

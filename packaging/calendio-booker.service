@@ -3,6 +3,8 @@ Description=Calendio booking page (localhost; cloudflared publishes it)
 After=network.target
 
 [Service]
+# Google Desktop OAuth client (CALENDIO_GOOGLE_CLIENT_ID/_SECRET); optional.
+EnvironmentFile=-%h/.config/calendio/google.env
 ExecStart=%h/.local/bin/calendio-booker --port 8788
 Restart=on-failure
 RestartSec=5

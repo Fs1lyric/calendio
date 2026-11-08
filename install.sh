@@ -27,6 +27,19 @@ install -Dm644 packaging/calendio.desktop "$data/applications/calendio.desktop"
 install -Dm644 packaging/calendio.svg "$data/icons/hicolor/scalable/apps/calendio.svg"
 update-desktop-database -q "$data/applications" 2>/dev/null || true
 gtk-update-icon-cache -q "$data/icons/hicolor" 2>/dev/null || true
+# Google sync credentials live here (0600); a commented template on first install.
+env_file="${XDG_CONFIG_HOME:-$HOME/.config}/calendio/google.env"
+if [[ ! -e "$env_file" ]]; then
+    mkdir -p "$(dirname "$env_file")"
+    (umask 077 && cat > "$env_file" <<'ENV'
+# Google Calendar two-way sync: a Desktop OAuth client from console.cloud.google.com.
+# Fill both lines in, then choose "Connect Google Calendar" in Calendio.
+#CALENDIO_GOOGLE_CLIENT_ID=
+#CALENDIO_GOOGLE_CLIENT_SECRET=
+ENV
+    )
+fi
+chmod 600 "$env_file"
 systemctl --user daemon-reload
 systemctl --user enable calendio-booker.service
 systemctl --user restart calendio-booker.service

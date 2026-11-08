@@ -1,4 +1,5 @@
 pub mod calendars;
+pub mod config;
 pub mod db;
 pub mod recur;
 pub mod slots;
