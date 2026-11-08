@@ -568,7 +568,7 @@ impl App {
             self.editor = Some(self.make_editor(form, None));
         }
         self.editor_frame(&ctx);
-        if self.recovery.show(&ctx, &mut self.db) {
+        if self.recovery.show(&ctx, &mut self.db, self.clock) {
             self.stale = true;
         }
     }

@@ -10,6 +10,13 @@ out=${1:-screenshots}
 mkdir -p "$out"
 scratch=$(mktemp -d)
 export CALENDIO_DB="$scratch/demo.db"
+# Dummy backup files so the restore list has rows; the list only reads their names.
+export CALENDIO_BACKUP_DIR="$scratch/backups"
+mkdir -p "$CALENDIO_BACKUP_DIR"
+for days in 0 1 2 5; do
+    touch "$CALENDIO_BACKUP_DIR/calendio-$(date -u -d "-$days days" +%F).sqlite3"
+done
+touch "$CALENDIO_BACKUP_DIR/calendio-$(date -u +%F)-$(date -u -d '-1 hour' +%H%M%S).sqlite3"
 unset WAYLAND_DISPLAY
 export LIBGL_ALWAYS_SOFTWARE=1
 # A US clock, so the shots show 12-hour times; Calendio reads it from the locale.
@@ -50,6 +57,7 @@ for theme in light dark; do
         shoot "$view-$theme-390" 390 --view "$view" --theme "apple-$theme"
     done
 done
+shoot recovery-light 1180 --view week --theme apple-light --recovery
 # Wide enough for the sidebar's today panel.
 shoot week-light-1500 1500 --view week --theme apple-light
 
