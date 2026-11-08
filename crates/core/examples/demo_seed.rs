@@ -75,5 +75,18 @@ fn main() {
     gym.rrule = Some("FREQ=WEEKLY;BYDAY=MO,WE".into());
     db.create_event_in_calendar(&gym, health).unwrap();
 
-    println!("seeded {} with {} events", path.display(), events.len() + 2);
+    // A subscribed holidays feed, as the booking service would have fetched it.
+    let holidays = db.create_subscription("Holidays", "#34c759", "webcal://example.com/holidays.ics").unwrap();
+    let mut feed = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Calendio demo//EN\r\n");
+    for (uid, day, title) in [("founders", d(2), "Founders' Day"), ("harvest", d(12), "Harvest Festival")] {
+        feed.push_str(&format!(
+            "BEGIN:VEVENT\r\nUID:{uid}@demo\r\nDTSTAMP:20260101T000000Z\r\nDTSTART;VALUE=DATE:{}\r\n\
+             SUMMARY:{title}\r\nTRANSP:TRANSPARENT\r\nEND:VEVENT\r\n",
+            day.format("%Y%m%d")
+        ));
+    }
+    feed.push_str("END:VCALENDAR\r\n");
+    db.replace_subscription(holidays, &feed, None, Utc::now(), "UTC").unwrap();
+
+    println!("seeded {} with {} events", path.display(), events.len() + 4);
 }

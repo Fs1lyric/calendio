@@ -150,9 +150,18 @@ impl App {
         }
     }
 
+    /// Events from a subscribed feed cannot be edited, dragged or recoloured.
+    fn read_only(&self, event_id: i64) -> bool {
+        self.db.event_calendar(event_id).is_ok_and(|c| self.workspace.subscribed.contains(&c))
+    }
+
     fn make_editor(&self, form: Form, series: Option<calendio_core::db::Event>) -> Editor {
-        let calendar_id =
-            series.as_ref().and_then(|e| self.db.event_calendar(e.id).ok()).unwrap_or(self.workspace.selected);
+        let read_only = series.as_ref().is_some_and(|e| self.read_only(e.id));
+        let writable = |id: &i64| !self.workspace.subscribed.contains(id);
+        let calendar_id = series
+            .as_ref()
+            .and_then(|e| self.db.event_calendar(e.id).ok())
+            .unwrap_or(Some(self.workspace.selected).filter(writable).unwrap_or(1));
         let details = series.as_ref().map(|e| self.db.event_details(e.id));
         let mut editor = Editor::new(form, series, self.clock);
         if let Some(details) = details {
@@ -163,7 +172,8 @@ impl App {
         }
 
         editor.calendar_id = calendar_id;
-        editor.calendars = self.workspace.calendars.clone();
+        editor.read_only = read_only;
+        editor.calendars = self.workspace.calendars.iter().filter(|c| read_only || writable(&c.id)).cloned().collect();
         editor
     }
 
@@ -221,6 +231,9 @@ impl App {
             self.stale = true;
             return;
         };
+        if self.read_only(o.event_id) {
+            return;
+        }
         let Ok(Some(e)) = self.db.event(o.event_id) else { return };
         let mut f = Form::open(o, &e, self.tz);
         let length = f.end - f.start;
@@ -247,6 +260,9 @@ impl App {
             self.stale = true;
             return;
         };
+        if self.read_only(o.event_id) {
+            return;
+        }
         let Ok(Some(e)) = self.db.event(o.event_id) else { return };
         // Straight from the stored event, so an edited occurrence's title or
         // times never spill onto the rest of the series.
@@ -367,6 +383,9 @@ impl App {
             ui.separator();
             if item(ui, "Manage calendars…", "") {
                 self.workspace.open_manage();
+            }
+            if item(ui, "New subscription…", "") {
+                self.workspace.open_subscribe();
             }
             if item(ui, "Import / export…", "") {
                 self.workspace.open_transfer();
@@ -804,6 +823,44 @@ mod tests {
 #[cfg(test)]
 mod calendar_edit_tests {
     use super::*;
+    fn subscribed_app() -> (App, i64) {
+        let db = Db::open_in_memory().unwrap();
+        let id = db.create_subscription("Holidays", "#ff9500", "https://example.com/h.ics").unwrap();
+        let feed = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//T//EN\r\nBEGIN:VEVENT\r\nUID:x\r\n\
+                    DTSTAMP:20261001T000000Z\r\nDTSTART:20261019T090000Z\r\nDTEND:20261019T100000Z\r\n\
+                    SUMMARY:Holiday\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        db.replace_subscription(id, feed, None, "2026-10-01T00:00:00Z".parse().unwrap(), "UTC").unwrap();
+        let mut app = App::new(db, chrono_tz::UTC);
+        app.view = View::Week;
+        app.anchor = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+        app.stale = true;
+        app.reload();
+        (app, id)
+    }
+    #[test]
+    fn dragging_or_recolouring_a_subscribed_event_is_ignored() {
+        let (mut app, _) = subscribed_app();
+        let index = app.occ.iter().position(|o| o.title == "Holiday").expect("the feed event is shown");
+        let before = app.db.event(app.occ[index].event_id).unwrap().unwrap();
+        app.drop_at(index, NaiveDate::from_ymd_opt(2026, 10, 20).unwrap().and_hms_opt(9, 0, 0).unwrap());
+        app.recolour(index, Some("#34c759".into()));
+        assert_eq!(app.db.event(before.id).unwrap().unwrap(), before);
+        assert_eq!(app.error, None, "ignored quietly, no error banner");
+    }
+    #[test]
+    fn subscribed_events_open_read_only_and_new_events_never_target_a_feed() {
+        let (mut app, feed) = subscribed_app();
+        let index = app.occ.iter().position(|o| o.title == "Holiday").unwrap();
+        app.open(index);
+        assert!(app.editor.as_ref().unwrap().read_only);
+        app.editor = None;
+        app.workspace.selected = feed;
+        app.new_event();
+        let editor = app.editor.as_ref().unwrap();
+        assert!(!editor.read_only);
+        assert_ne!(editor.calendar_id, feed);
+        assert!(editor.calendars.iter().all(|c| c.id != feed), "the calendar menu leaves feeds out");
+    }
     #[test]
     fn recolouring_a_block_changes_the_whole_series_and_nothing_else() {
         let db = Db::open_in_memory().unwrap();

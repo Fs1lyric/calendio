@@ -27,6 +27,8 @@ pub struct Editor {
     pub details: calendio_core::details::EventDetails,
     pub calendar_id: i64,
     pub calendars: Vec<calendio_core::calendars::Calendar>,
+    /// An event from a subscribed feed: shown, never saved or deleted.
+    pub read_only: bool,
     /// The stored event when editing one.
     series: Option<Event>,
     clock: Clock,
@@ -57,6 +59,7 @@ impl Editor {
             details: calendio_core::details::EventDetails { busy: !form.all_day, ..Default::default() },
             calendar_id: 1,
             calendars: Vec::new(),
+            read_only: false,
             clock,
             start_time: clock.field(form.start.time()),
             end_time: clock.field(form.end.time()),
@@ -94,6 +97,10 @@ impl Editor {
     }
 
     fn save(&mut self, scope: Scope) -> Option<Outcome> {
+        if self.read_only {
+            self.error = Some("Subscribed calendars are read-only".into());
+            return None;
+        }
         if let Err(e) = self.read_times() {
             self.error = Some(e);
             return None;
@@ -119,14 +126,18 @@ impl Editor {
                     .find(|c| c.id == self.calendar_id)
                     .map(|c| c.name.as_str())
                     .unwrap_or("Personal");
-                egui::ComboBox::from_id_salt("event-calendar").selected_text(name).icon(chrome::updown).show_ui(
-                    ui,
-                    |ui| {
-                        for calendar in &self.calendars {
-                            ui.selectable_value(&mut self.calendar_id, calendar.id, &calendar.name);
-                        }
-                    },
-                );
+                if self.read_only {
+                    ui.label(RichText::new(format!("↻ {name} · subscribed, read-only")).color(theme::ink_3()));
+                } else {
+                    egui::ComboBox::from_id_salt("event-calendar").selected_text(name).icon(chrome::updown).show_ui(
+                        ui,
+                        |ui| {
+                            for calendar in &self.calendars {
+                                ui.selectable_value(&mut self.calendar_id, calendar.id, &calendar.name);
+                            }
+                        },
+                    );
+                }
                 ui.add_space(10.0);
                 if self.asking.is_some() {
                     if let Some(error) = &self.error {
@@ -140,7 +151,10 @@ impl Editor {
                     ui,
                     |ui| match self.asking {
                         Some(asking) => out = self.ask_scope(ui, asking),
-                        None => entered = self.fields(ui),
+                        None => {
+                            let read_only = self.read_only;
+                            entered = ui.add_enabled_ui(!read_only, |ui| self.fields(ui)).inner && !read_only;
+                        }
                     },
                 );
                 if out.is_none() && self.asking.is_none() {
@@ -327,6 +341,14 @@ impl Editor {
         }
         ui.add_space(14.0);
         let mut out = None;
+        if self.read_only {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if accent_button(ui, "Done").clicked() || entered {
+                    out = Some(Outcome::Close);
+                }
+            });
+            return out;
+        }
         ui.horizontal(|ui| {
             if !self.is_new() && ui.button(RichText::new("Delete").color(theme::danger())).clicked() {
                 if self.form.is_series() {
@@ -452,6 +474,15 @@ mod tests {
     use super::*;
     use crate::clock::Clock;
 
+    #[test]
+    fn a_read_only_editor_never_saves() {
+        let start = chrono::NaiveDate::from_ymd_opt(2026, 11, 7).unwrap().and_hms_opt(18, 0, 0).unwrap();
+        let mut editor =
+            Editor::new(Form::new(start, start + Duration::hours(1), false, chrono_tz::UTC), None, Clock::H12);
+        editor.read_only = true;
+        assert!(editor.save(Scope::All).is_none());
+        assert!(editor.error.as_deref().is_some_and(|e| e.contains("read-only")));
+    }
     #[test]
     fn time_boxes_follow_the_clock() {
         let start = chrono::NaiveDate::from_ymd_opt(2026, 11, 7).unwrap().and_hms_opt(18, 0, 0).unwrap();

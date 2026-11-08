@@ -7,6 +7,7 @@ use calendio_core::{
 use chrono_tz::Tz;
 use eframe::egui::{self, RichText};
 use std::{
+    collections::HashSet,
     fs::OpenOptions,
     io::{Read, Write},
     path::PathBuf,
@@ -14,6 +15,8 @@ use std::{
 
 pub struct Workspace {
     pub calendars: Vec<Calendar>,
+    /// Calendars fed by an iCal URL: read-only, never a target for new events.
+    pub subscribed: HashSet<i64>,
     pub selected: i64,
     pub search_open: bool,
     query: String,
@@ -27,12 +30,17 @@ pub struct Workspace {
     path: String,
     message: String,
     delete_pending: Option<i64>,
+    sub_url: String,
+    sub_name: String,
+    sub_color: String,
+    focus_subscription: bool,
 }
 
 impl Workspace {
     pub fn new(db: &Db) -> Self {
         Self {
             calendars: db.calendars().unwrap_or_default(),
+            subscribed: subscribed(db),
             selected: 1,
             search_open: false,
             query: String::new(),
@@ -46,11 +54,16 @@ impl Workspace {
             path: String::new(),
             message: String::new(),
             delete_pending: None,
+            sub_url: String::new(),
+            sub_name: String::new(),
+            sub_color: "#ff9500".into(),
+            focus_subscription: false,
         }
     }
     pub fn refresh(&mut self, db: &Db) -> Result<(), String> {
         self.calendars = db.calendars().map_err(|e| e.to_string())?;
-        if !self.calendars.iter().any(|c| c.id == self.selected) {
+        self.subscribed = subscribed(db);
+        if !self.calendars.iter().any(|c| c.id == self.selected) || self.subscribed.contains(&self.selected) {
             self.selected = 1;
         }
         if self.search_open {
@@ -66,6 +79,11 @@ impl Workspace {
         self.drafts = self.calendars.clone();
         self.manage_open = true;
         self.message.clear();
+    }
+    /// The calendars window, scrolled to "New subscription" with the URL box focused.
+    pub fn open_subscribe(&mut self) {
+        self.open_manage();
+        self.focus_subscription = true;
     }
     pub fn open_transfer(&mut self) {
         self.transfer_open = true;
@@ -106,7 +124,7 @@ impl Workspace {
     pub fn calendar_picker(&mut self, ui: &mut egui::Ui, id: &str) {
         let name = self.calendars.iter().find(|c| c.id == self.selected).map(|c| c.name.as_str()).unwrap_or("Personal");
         egui::ComboBox::from_id_salt(id).selected_text(name).icon(crate::chrome::updown).show_ui(ui, |ui| {
-            for calendar in &self.calendars {
+            for calendar in self.calendars.iter().filter(|c| !self.subscribed.contains(&c.id)) {
                 ui.selectable_value(&mut self.selected, calendar.id, &calendar.name);
             }
         });
@@ -139,11 +157,18 @@ impl Workspace {
                 p.circle_stroke(centre, 6.3, Stroke::new(1.5, colour));
             }
             let text = pos2(row.left() + 30.0, row.center().y);
-            p.text(text, Align2::LEFT_CENTER, &c.name, FontId::proportional(13.0), theme::ink());
+            let label = p.text(text, Align2::LEFT_CENTER, &c.name, FontId::proportional(13.0), theme::ink());
+            let feed = self.subscribed.contains(&c.id);
+            if feed {
+                let glyph = pos2(label.right() + 6.0, row.center().y);
+                p.text(glyph, Align2::LEFT_CENTER, "↻", FontId::proportional(12.0), theme::ink_3());
+            }
             if dot.on_hover_text(if c.visible { "Hide" } else { "Show" }).clicked() {
                 c.visible = !c.visible;
                 db.update_calendar(c.id, &c.name, &c.color, c.visible).map_err(|e| e.to_string())?;
                 changed = true;
+            } else if feed {
+                name.on_hover_text("Subscribed calendar · read-only");
             } else if name.on_hover_text("New events go here").clicked() {
                 self.selected = c.id;
             }
@@ -214,6 +239,7 @@ impl Workspace {
     pub fn dialogs(&mut self, ctx: &egui::Context, db: &Db, tz: Tz) -> bool {
         let mut changed = false;
         let mut manage_open = self.manage_open;
+        let subscriptions = db.subscriptions().unwrap_or_default();
         egui::Window::new("Your calendars").open(&mut manage_open).default_width(520.0).show(ctx, |ui| {
             ui.label("Visibility only affects your view. All events still block bookings.");
             egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
@@ -224,6 +250,13 @@ impl Workspace {
                         ui.add(egui::TextEdit::singleline(&mut calendar.name).desired_width(150.0));
                     });
                     colour_row(ui, &mut calendar.color);
+                    let feed = subscriptions.iter().find(|s| s.calendar_id == calendar.id);
+                    if let Some(feed) = feed {
+                        ui.label(RichText::new(format!("↻ {}", feed.url)).small().color(theme::ink_3()));
+                        let status = db.setting(&format!("subscription_status_{}", calendar.id)).ok().flatten();
+                        let status = status.unwrap_or_else(|| "Waiting for the booking service to fetch it".into());
+                        ui.label(RichText::new(status).small().color(theme::ink_3()));
+                    }
                     ui.horizontal(|ui| {
                         if ui.button("Save calendar").clicked() {
                             match db.update_calendar(calendar.id, &calendar.name, &calendar.color, calendar.visible) {
@@ -236,10 +269,11 @@ impl Workspace {
                         }
                         if calendar.id != 1
                             && ui
-                                .button(if self.delete_pending == Some(calendar.id) {
-                                    "Confirm: move events to Personal"
-                                } else {
-                                    "Remove calendar"
+                                .button(match (self.delete_pending == Some(calendar.id), feed.is_some()) {
+                                    (true, true) => "Confirm: remove its events",
+                                    (true, false) => "Confirm: move events to Personal",
+                                    (false, true) => "Unsubscribe",
+                                    (false, false) => "Remove calendar",
                                 })
                                 .clicked()
                         {
@@ -247,7 +281,11 @@ impl Workspace {
                                 match db.delete_calendar(calendar.id) {
                                     Ok(()) => {
                                         changed = true;
-                                        self.message = "Calendar removed; events moved to Personal".into();
+                                        self.message = if feed.is_some() {
+                                            "Unsubscribed".into()
+                                        } else {
+                                            "Calendar removed; events moved to Personal".into()
+                                        };
                                     }
                                     Err(e) => self.message = e.to_string(),
                                 }
@@ -280,6 +318,8 @@ impl Workspace {
                     Err(e) => self.message = e.to_string(),
                 }
             }
+            ui.separator();
+            changed |= self.subscribe_form(ui, db, !subscriptions.is_empty());
             ui.label(&self.message);
         });
         self.manage_open = manage_open;
@@ -326,6 +366,51 @@ impl Workspace {
         }
         changed
     }
+    /// "New subscription": any webcal:// or https:// iCal address, read-only, refreshed
+    /// by the booking service every 6 hours.
+    fn subscribe_form(&mut self, ui: &mut egui::Ui, db: &Db, any: bool) -> bool {
+        ui.label("New subscription");
+        let url = ui.add(
+            egui::TextEdit::singleline(&mut self.sub_url)
+                .hint_text("webcal://… or https://….ics")
+                .desired_width(f32::INFINITY),
+        );
+        if std::mem::take(&mut self.focus_subscription) {
+            url.request_focus();
+            url.scroll_to_me(Some(egui::Align::Center));
+        }
+        ui.add(
+            egui::TextEdit::singleline(&mut self.sub_name).hint_text("Holidays, Sports, School…").desired_width(240.0),
+        );
+        colour_row(ui, &mut self.sub_color);
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            if ui.button("Subscribe").clicked() {
+                let name = if self.sub_name.trim().is_empty() { "Subscription" } else { self.sub_name.trim() };
+                match db.create_subscription(name, &self.sub_color, &self.sub_url) {
+                    Ok(_) => {
+                        changed = true;
+                        self.sub_url.clear();
+                        self.sub_name.clear();
+                        self.message = "Subscribed. Its events appear after the booking service fetches it.".into();
+                    }
+                    Err(e) => self.message = e.to_string(),
+                }
+            }
+            if any && ui.button("Refresh subscriptions now").clicked() {
+                self.message = match db.set_setting("subscriptions_refresh", "1") {
+                    Ok(()) => "Refreshing; reopen this window in a few seconds to see the result.".into(),
+                    Err(e) => e.to_string(),
+                };
+            }
+        });
+        ui.label(
+            RichText::new("Subscribed calendars are read-only and refresh every 6 hours.")
+                .small()
+                .color(theme::ink_3()),
+        );
+        changed
+    }
     fn file_path(&self) -> Result<PathBuf, String> {
         let path = self.path.trim();
         if path.is_empty() {
@@ -359,6 +444,10 @@ impl Workspace {
             OpenOptions::new().write(true).create_new(true).open(self.file_path()?).map_err(|e| e.to_string())?;
         file.write_all(data.as_bytes()).map_err(|e| e.to_string())
     }
+}
+
+fn subscribed(db: &Db) -> HashSet<i64> {
+    db.subscriptions().unwrap_or_default().into_iter().map(|s| s.calendar_id).collect()
 }
 
 /// A calendar always has a colour, so the picker has no "calendar colour" swatch.
