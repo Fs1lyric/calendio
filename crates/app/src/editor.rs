@@ -159,7 +159,7 @@ impl Editor {
             theme::hex(self.calendars.iter().find(|c| c.id == self.calendar_id).map(|c| c.color.as_str()));
         let f = &mut self.form;
         let title = egui::TextEdit::singleline(&mut f.title)
-            .hint_text("New Event")
+            .hint_text(RichText::new("New Event").font(theme::semibold(22.0)).color(theme::ink_3()))
             .font(theme::semibold(22.0))
             .frame(egui::Frame::NONE)
             .desired_width(f32::INFINITY);

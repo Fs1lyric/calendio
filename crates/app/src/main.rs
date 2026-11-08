@@ -78,7 +78,7 @@ impl App {
             occ: Vec::new(),
             stale: true,
             loaded_at: std::time::Instant::now(),
-            scroll_to: Some(7.0 * views::HOUR_PX),
+            scroll_to: Some(6.5 * views::HOUR_PX),
             sidebar: None,
             selected: None,
             editor: None,
@@ -127,7 +127,7 @@ impl App {
         self.workspace.search_open = false;
         self.navigation.sync(anchor);
         if view != self.view && view != View::Month {
-            self.scroll_to = Some(7.0 * views::HOUR_PX);
+            self.scroll_to = Some(6.5 * views::HOUR_PX);
         }
         (self.view, self.anchor, self.stale) = (view, anchor, true);
     }
