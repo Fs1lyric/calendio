@@ -26,6 +26,19 @@ pub async fn run(state: Arc<State>) {
     if mail.is_none() && std::env::var_os("CALENDIO_RESEND_API_KEY").is_none() {
         let _ = state.db.lock().unwrap().set_setting("email_status", "Not configured; messages remain queued");
     }
+    match crate::subscriptions::Http::new() {
+        Ok(fetcher) => {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(10));
+                loop {
+                    tick.tick().await;
+                    crate::subscriptions::refresh(&state, &fetcher, (state.now)()).await;
+                }
+            });
+        }
+        Err(error) => eprintln!("calendio-booker: subscriptions: {error}"),
+    }
     let mut last_google = Utc::now() - Duration::minutes(2);
     let mut last_backup = None;
     let mut next_backup_try = chrono::DateTime::<Utc>::MIN_UTC;

@@ -6,6 +6,7 @@ mod google;
 mod google_auth;
 mod providers;
 mod remind;
+mod subscriptions;
 mod workers;
 
 use axum::extract::{Path, Query, State as Ext};

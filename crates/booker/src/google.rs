@@ -111,6 +111,10 @@ fn projection(db: &Db, now: DateTime<Utc>) -> Result<Vec<Wire>, String> {
     let to = stamp(now + Duration::days(365));
     let mut result = Vec::new();
     for o in db.occurrences_between(&from, &to).map_err(failure)? {
+        // Subscribed feeds are someone else's calendar; never copy them into Google.
+        if db.is_subscribed(db.event_calendar(o.event_id).map_err(failure)?).map_err(failure)? {
+            continue;
+        }
         let event = db.event(o.event_id).map_err(failure)?.ok_or("Missing sync event")?;
         let details = db.event_details(o.event_id).map_err(failure)?;
         let identity = key(db, o.event_id, o.original_start.clone())?;
