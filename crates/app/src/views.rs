@@ -193,6 +193,9 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
             egui::vec2(w, h),
         );
         let r = ui.interact(cell, Id::new(("cell", day)), Sense::click());
+        if is_weekend(day) {
+            painter.rect_filled(cell, 0.0, theme::weekend());
+        }
         if r.hovered() {
             painter.rect_filled(cell, 0.0, theme::hover());
         }
@@ -255,30 +258,38 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
             let r = slot(n);
             let color = theme::hex(o.color.as_deref());
             let clip = painter.with_clip_rect(r.intersect(ui.clip_rect()));
-            if s.is_selected(o) {
-                let c = theme::event_colors(color, true);
-                clip.rect_filled(r, CornerRadius::same(4), c.fill);
-                clip.text(
-                    Pos2::new(r.left() + 6.0, r.center().y),
-                    Align2::LEFT_CENTER,
-                    timed_label(s, o),
-                    font(12.0),
-                    c.title,
-                );
-            } else {
-                clip.circle_filled(Pos2::new(r.left() + 5.0, r.center().y), 3.5, color);
-                let start = s.clock.short(grid::local(&o.start, s.tz).time());
-                let mut job = egui::text::LayoutJob::default();
-                let section = |color| egui::TextFormat { font_id: font(12.0), color, ..Default::default() };
-                // A phone-width cell has no room for both; the title matters more.
-                if cell.width() >= 90.0 {
-                    job.append(&format!("{start} "), 0.0, section(theme::ink_2()));
+            // Apple's row: dot, title, and the start time in grey at the right.
+            // The title gives way with an ellipsis; a phone-width cell drops the time.
+            let selected = s.is_selected(o).then(|| theme::event_colors(color, true));
+            let (title_color, time_color) = match selected {
+                Some(c) => {
+                    clip.rect_filled(r, CornerRadius::same(4), c.fill);
+                    (c.title, c.title)
                 }
-                job.append(&o.title, 0.0, section(theme::ink()));
-                let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
-                let at = Pos2::new(r.left() + 13.0, r.center().y - galley.size().y / 2.0);
-                clip.galley(at, galley, theme::ink());
+                None => {
+                    clip.circle_filled(Pos2::new(r.left() + 5.0, r.center().y), 3.5, color);
+                    (theme::ink(), theme::ink_2())
+                }
+            };
+            let mut title_right = r.right() - 2.0;
+            if cell.width() >= 90.0 {
+                let start = s.clock.short(grid::local(&o.start, s.tz).time());
+                let time = ui.ctx().fonts_mut(|f| f.layout_no_wrap(start, font(12.0), time_color));
+                title_right -= time.size().x + 6.0;
+                clip.galley(
+                    Pos2::new(r.right() - 2.0 - time.size().x, r.center().y - time.size().y / 2.0),
+                    time,
+                    time_color,
+                );
             }
+            let title_left = r.left() + 13.0;
+            let mut job = egui::text::LayoutJob::single_section(
+                o.title.clone(),
+                egui::TextFormat { font_id: font(12.0), color: title_color, ..Default::default() },
+            );
+            job.wrap = egui::text::TextWrapping::truncate_at_width((title_right - title_left).max(8.0));
+            let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
+            clip.galley(Pos2::new(title_left, r.center().y - galley.size().y / 2.0), galley, title_color);
             let resp = with_notes(ui.interact(r, Id::new(("mchip", k, day)), Sense::click()), &o.notes);
             if resp.clicked() {
                 action = Some(Action::Open(k));
@@ -324,11 +335,6 @@ pub fn month(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
     action
 }
 
-/// "9 AM Title" for a timed event in the month grid.
-fn timed_label(s: &Scene, o: &Occurrence) -> String {
-    format!("{} {}", s.clock.short(grid::local(&o.start, s.tz).time()), o.title)
-}
-
 // ---------- week and day ----------
 
 /// A drag in progress, kept in egui's memory between frames.
@@ -338,7 +344,9 @@ enum Drag {
     Move { index: usize, grab: i64 },
 }
 
-pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f32>) -> Option<Action> {
+/// `scroll_to` is kept until it can land: on the grid's first frame egui does
+/// not know its height yet and would clamp the offset to midnight.
+pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: &mut Option<f32>) -> Option<Action> {
     let mut action = None;
     let full = ui.available_rect_before_wrap();
     let col_w = (full.width() - GUTTER) / days.len() as f32;
@@ -430,9 +438,12 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
 
     // The hours.
     let mut area = egui::ScrollArea::vertical().id_salt("timegrid").auto_shrink([false, false]);
-    if let Some(y) = scroll_to {
+    let laid_out = Id::new("timegrid-laid-out");
+    if let Some(y) = scroll_to.filter(|_| ui.data(|d| d.get_temp::<bool>(laid_out).is_some())) {
         area = area.vertical_scroll_offset(y);
+        *scroll_to = None;
     }
+    ui.data_mut(|d| d.insert_temp(laid_out, true));
     area.show(ui, |ui| {
         // Padding above midnight and below the last hour keeps their labels whole.
         let (outer, _) = ui.allocate_exact_size(egui::vec2(full.width(), 24.0 * HOUR_PX + 2.0 * PAD), Sense::hover());
@@ -445,12 +456,15 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
             .contains(&s.now.date())
             .then(|| body.top() + (s.now.hour() * 60 + s.now.minute()) as f32 / 60.0 * HOUR_PX);
         let (left, right) = (body.left() + GUTTER, body.right());
+        for (i, day) in days.iter().enumerate() {
+            if is_weekend(*day) {
+                p.rect_filled(col(i), 0.0, theme::weekend());
+            }
+        }
         for h in 0..24 {
             let y = body.top() + h as f32 * HOUR_PX;
-            let (line, half) = (hairline(y), hairline(y + HOUR_PX / 2.0));
+            let line = hairline(y);
             p.line_segment([Pos2::new(left, line), Pos2::new(right, line)], Stroke::new(1.0 / ppp, theme::line()));
-            let faint = theme::line().gamma_multiply(0.45);
-            p.line_segment([Pos2::new(left, half), Pos2::new(right, half)], Stroke::new(1.0 / ppp, faint));
             let near_now = now_y.is_some_and(|n| (n - y).abs() < 18.0);
             if h > 0 && !near_now {
                 p.text(
@@ -597,6 +611,10 @@ pub fn time_grid(ui: &mut Ui, days: &[NaiveDate], s: &Scene, scroll_to: Option<f
         }
     });
     action
+}
+
+fn is_weekend(day: NaiveDate) -> bool {
+    matches!(day.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun)
 }
 
 /// Minutes after midnight as a time of day; 24:00 reads as midnight.
@@ -932,7 +950,7 @@ mod tests {
                             month(ui, &scene, day);
                         }
                         v => {
-                            time_grid(ui, &grid::days(v, day), &scene, None);
+                            time_grid(ui, &grid::days(v, day), &scene, &mut None);
                         }
                     },
                 );
@@ -964,14 +982,12 @@ mod tests {
         let now = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap().and_hms_opt(10, 30, 0).unwrap();
         let scene = Scene { occ: &occ, tz: chrono_tz::UTC, now, clock: Clock::H24, selected: None };
         let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(1180.0, 780.0));
-        let mut frame = 0;
+        let mut scroll = Some(8.0 * HOUR_PX);
         let mut run = |events: Vec<egui::Event>| {
             let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
             let mut action = None;
-            let scroll = (frame == 0).then_some(8.0 * HOUR_PX);
-            frame += 1;
             let mut output = context.run_ui(input, |ui| {
-                action = time_grid(ui, &grid::days(View::Week, monday), &scene, scroll);
+                action = time_grid(ui, &grid::days(View::Week, monday), &scene, &mut scroll);
             });
             output.textures_delta.clear();
             (output.shapes, action)
@@ -1029,11 +1045,11 @@ mod tests {
         let scene = Scene { occ, tz: chrono_tz::UTC, now, clock, selected };
         let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(width, 780.0));
         let mut shapes = Vec::new();
-        for frame in 0..3 {
+        let mut scroll = Some(8.0 * HOUR_PX);
+        for _ in 0..3 {
             let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
             let mut output = context.run_ui(input, |ui| {
-                let scroll = (frame == 0).then_some(8.0 * HOUR_PX);
-                time_grid(ui, &grid::days(View::Week, monday), &scene, scroll);
+                time_grid(ui, &grid::days(View::Week, monday), &scene, &mut scroll);
             });
             output.textures_delta.clear();
             shapes = output.shapes;
@@ -1113,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn hour_lines_are_hairlines_and_half_hours_are_fainter() {
+    fn hour_lines_are_hairlines_and_there_are_no_half_hour_lines() {
         let (shapes, screen) = week_frame(Clock::H12);
         let texts = crate::frames::text_rects(&shapes, screen);
         let y = |label: &str| texts.iter().find(|(t, _)| t == label).map(|(_, r)| r.center().y).unwrap();
@@ -1130,13 +1146,38 @@ mod tests {
             })
             .collect();
         // Label rects are glyph ink, a few points off the line they are centred on;
-        // lines are 24 points apart, so 6 is unambiguous.
+        // hours are 48 points apart, so 6 is unambiguous.
         let near = |target: f32| lines.iter().find(|(y, _)| (y - target).abs() < 6.0).map(|(_, s)| *s);
         let hour = near(nine).expect("an hour line at 9 AM");
-        let half = near((nine + ten) / 2.0).expect("a half-hour line at 9:30");
         assert!(hour.width <= 1.0, "hour lines are hairlines");
         assert_eq!(hour.color, theme::line());
-        assert!(half.color.a() < hour.color.a(), "half-hour lines are fainter than hour lines");
+        assert!(near((nine + ten) / 2.0).is_none(), "Apple draws no half-hour lines");
+    }
+
+    #[test]
+    fn weekend_columns_are_shaded_in_the_week() {
+        let (shapes, screen) = week_frame(Clock::H12);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let shaded = |label: &str| {
+            let x = crate::frames::one(&texts, label).center().x;
+            crate::frames::rects(&shapes)
+                .iter()
+                .any(|r| r.fill == theme::weekend() && r.rect.height() > 300.0 && r.rect.x_range().contains(x))
+        };
+        assert!(shaded("Sat") && shaded("Sun"), "Saturday and Sunday are grey");
+        assert!(!shaded("Wed"), "weekdays stay white");
+    }
+
+    #[test]
+    fn weekend_cells_are_shaded_in_the_month() {
+        let (shapes, screen) = month_frame(&[]);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let shaded = |label: &str| {
+            let c = crate::frames::one(&texts, label).center();
+            crate::frames::rects(&shapes).iter().any(|r| r.fill == theme::weekend() && r.rect.contains(c))
+        };
+        assert!(shaded("24") && shaded("25"), "24 and 25 October are a weekend");
+        assert!(!shaded("22"), "a Thursday is not");
     }
 
     #[test]
@@ -1257,7 +1298,7 @@ mod tests {
     }
 
     #[test]
-    fn month_cells_put_the_date_top_right_and_list_timed_events_as_dot_time_title() {
+    fn month_cells_put_the_date_top_right_and_list_timed_events_as_dot_title_time() {
         let blue = Color32::from_rgb(0x24, 0x57, 0xb2);
         let occ = [event(1, "Planning", "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", "#2457b2")];
         let (shapes, screen) = month_frame(&occ);
@@ -1265,8 +1306,12 @@ mod tests {
         let column = 1180.0 / 7.0;
         // 22 Oct is a Thursday: the fourth column.
         let (left, right) = (3.0 * column, 4.0 * column);
-        let line = crate::frames::one(&texts, "9 AM Planning");
-        assert!(line.left() > left && line.left() < left + 30.0, "the event line starts at the cell's left");
+        let line = crate::frames::one(&texts, "Planning");
+        assert!(line.left() > left && line.left() < left + 30.0, "the title starts at the cell's left");
+        let time = crate::frames::one(&texts, "9 AM");
+        assert!(time.right() < right && time.right() > right - 16.0, "the time sits at the cell's right");
+        assert!((time.center().y - line.center().y).abs() < 3.0, "on the same line as the title");
+        assert_eq!(crate::frames::text_color(&shapes, "9 AM", time.center()), Some(theme::ink_2()));
         let dot = crate::frames::circles(&shapes)
             .into_iter()
             .find(|c| c.fill == blue && c.center.x < line.left() && (c.center.y - line.center().y).abs() < 3.0);
@@ -1298,6 +1343,18 @@ mod tests {
         let texts = crate::frames::text_rects(&shapes, screen);
         crate::frames::one(&texts, "Planning");
         assert!(crate::frames::find(&texts, "9 AM Planning").is_empty());
+    }
+
+    #[test]
+    fn long_month_titles_end_in_an_ellipsis_before_the_time() {
+        let title = "Quarterly planning review with the whole team";
+        let occ = [event(1, title, "2026-10-22T14:00:00Z", "2026-10-22T15:00:00Z", "#2457b2")];
+        let (shapes, screen) = month_frame(&occ);
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let (cut, rect) = texts.iter().find(|(t, _)| t.starts_with("Quarterly")).expect("the title").clone();
+        assert!(cut.ends_with('…'), "cut short with an ellipsis, got {cut:?}");
+        let time = crate::frames::one(&texts, "2 PM");
+        assert!(rect.right() < time.left(), "the title stops before the time");
     }
 
     #[test]

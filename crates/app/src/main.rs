@@ -78,7 +78,7 @@ impl App {
             occ: Vec::new(),
             stale: true,
             loaded_at: std::time::Instant::now(),
-            scroll_to: Some(8.0 * views::HOUR_PX),
+            scroll_to: Some(7.0 * views::HOUR_PX),
             sidebar: None,
             selected: None,
             editor: None,
@@ -127,7 +127,7 @@ impl App {
         self.workspace.search_open = false;
         self.navigation.sync(anchor);
         if view != self.view && view != View::Month {
-            self.scroll_to = Some(8.0 * views::HOUR_PX);
+            self.scroll_to = Some(7.0 * views::HOUR_PX);
         }
         (self.view, self.anchor, self.stale) = (view, anchor, true);
     }
@@ -154,7 +154,7 @@ impl App {
         let calendar_id =
             series.as_ref().and_then(|e| self.db.event_calendar(e.id).ok()).unwrap_or(self.workspace.selected);
         let details = series.as_ref().map(|e| self.db.event_details(e.id));
-        let mut editor = Editor::new(form, series);
+        let mut editor = Editor::new(form, series, self.clock);
         if let Some(details) = details {
             match details {
                 Ok(details) => editor.details = details,
@@ -595,7 +595,7 @@ impl App {
                     View::Month => views::month(ui, &scene, self.anchor),
                     View::Agenda => views::agenda(ui, &scene),
                     View::Year => views::year(ui, &scene, self.anchor),
-                    v => views::time_grid(ui, &grid::days(v, self.anchor), &scene, self.scroll_to.take()),
+                    v => views::time_grid(ui, &grid::days(v, self.anchor), &scene, &mut self.scroll_to),
                 }
             })
             .inner;
@@ -1214,6 +1214,15 @@ mod toolbar_tests {
         for rect in find(&texts, "Personal") {
             assert!(rect.left() < 232.0, "only the sidebar names the Personal calendar");
         }
+    }
+
+    #[test]
+    fn week_opens_on_the_working_day_not_at_midnight() {
+        let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
+        app.go(View::Week, NaiveDate::from_ymd_opt(2026, 11, 5).unwrap());
+        let texts = render(&mut app, 1180.0, 780.0);
+        assert!(find(&texts, "1 AM").is_empty(), "the small hours are scrolled away");
+        assert_eq!(find(&texts, "7 AM").len(), 1, "seven in the morning is in view");
     }
 
     #[test]

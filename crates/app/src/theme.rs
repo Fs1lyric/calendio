@@ -174,6 +174,11 @@ pub fn tint() -> Color32 {
     surface().lerp_to_gamma(accent(), 0.14)
 }
 
+/// Saturday and Sunday: a whisper of grey over the grid, as in Apple Calendar.
+pub fn weekend() -> Color32 {
+    ink().gamma_multiply(if is_dark() { 0.035 } else { 0.025 })
+}
+
 /// A faint tint under a hovered borderless control.
 pub fn hover() -> Color32 {
     ink().gamma_multiply(0.07)
