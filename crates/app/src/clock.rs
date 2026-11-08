@@ -53,6 +53,14 @@ impl Clock {
         }
     }
 
+    /// An editor time box: "6:00 PM" or "18:00", minutes always shown.
+    pub fn field(self, t: NaiveTime) -> String {
+        match self {
+            Self::H24 => self.bare(t),
+            Self::H12 => format!("{} {}", self.bare(t), suffix(t.hour())),
+        }
+    }
+
     /// "9:30 – 10:30 AM", "11 AM – 1 PM", or "09:30 – 10:30".
     pub fn range(self, a: NaiveTime, b: NaiveTime) -> String {
         match self {
@@ -117,6 +125,14 @@ fn locale_time_format() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_fields_show_the_full_time_in_the_clock_format() {
+        let t = |h, m| NaiveTime::from_hms_opt(h, m, 0).unwrap();
+        assert_eq!(Clock::H12.field(t(18, 0)), "6:00 PM");
+        assert_eq!(Clock::H12.field(t(0, 30)), "12:30 AM");
+        assert_eq!(Clock::H24.field(t(18, 0)), "18:00");
+    }
 
     fn t(h: u32, m: u32) -> NaiveTime {
         NaiveTime::from_hms_opt(h, m, 0).unwrap()

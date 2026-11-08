@@ -96,3 +96,16 @@ pub fn pill_button(ui: &mut egui::Ui, label: &str, hover: &str) -> Response {
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, theme::ink());
     response.on_hover_text(hover)
 }
+
+/// The ⌃⌄ pair Apple draws at the end of a pop-up button, for `ComboBox::icon`.
+pub fn updown(ui: &egui::Ui, rect: Rect, _visuals: &egui::style::WidgetVisuals, _open: bool) {
+    let c = rect.center();
+    let stroke = Stroke::new(1.4, theme::ink_2());
+    let p = ui.painter();
+    for dir in [-1.0, 1.0] {
+        let tip = pos2(c.x, c.y + dir * 4.5);
+        let wing = |dx: f32| pos2(c.x + dx, c.y + dir * 1.5);
+        p.line_segment([wing(-3.0), tip], stroke);
+        p.line_segment([tip, wing(3.0)], stroke);
+    }
+}

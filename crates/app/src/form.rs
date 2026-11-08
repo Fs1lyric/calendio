@@ -88,9 +88,20 @@ fn preset_rule(repeat: &Repeat) -> Option<&'static str> {
     })
 }
 
-/// `HH:MM`, 24-hour.
+/// A typed time: "18:00", or twelve-hour "6 PM", "6:30pm", "12:15 am".
 pub fn parse_time(s: &str) -> Option<NaiveTime> {
-    NaiveTime::parse_from_str(s.trim(), "%H:%M").ok()
+    let s = s.trim().to_ascii_lowercase();
+    let (clock, pm) = match (s.strip_suffix("am"), s.strip_suffix("pm")) {
+        (Some(rest), _) => (rest.trim_end(), Some(false)),
+        (_, Some(rest)) => (rest.trim_end(), Some(true)),
+        _ => return NaiveTime::parse_from_str(&s, "%H:%M").ok(),
+    };
+    let (h, m) = clock.split_once(':').unwrap_or((clock, "0"));
+    let (h, m): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);
+    if !(1..=12).contains(&h) {
+        return None;
+    }
+    NaiveTime::from_hms_opt(h % 12 + if pm == Some(true) { 12 } else { 0 }, m, 0)
 }
 
 /// Splits a stored rule into a preset and how it ends.
@@ -272,6 +283,19 @@ mod robustness_tests {
         form.original_start = Some("2026-10-19T09:00:00Z".into());
         form.event_id = None;
         assert!(form.save(Scope::One, None).is_err());
+    }
+
+    #[test]
+    fn times_parse_in_twelve_and_twenty_four_hour_forms() {
+        let at = |h, m| NaiveTime::from_hms_opt(h, m, 0);
+        assert_eq!(parse_time("18:00"), at(18, 0));
+        assert_eq!(parse_time("6:00 PM"), at(18, 0));
+        assert_eq!(parse_time("6:30pm"), at(18, 30));
+        assert_eq!(parse_time("6 PM"), at(18, 0));
+        assert_eq!(parse_time("12 AM"), at(0, 0));
+        assert_eq!(parse_time("12:15 pm"), at(12, 15));
+        assert_eq!(parse_time("13 PM"), None);
+        assert_eq!(parse_time("tea time"), None);
     }
 }
 

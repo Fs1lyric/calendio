@@ -105,7 +105,7 @@ impl Workspace {
     }
     pub fn calendar_picker(&mut self, ui: &mut egui::Ui, id: &str) {
         let name = self.calendars.iter().find(|c| c.id == self.selected).map(|c| c.name.as_str()).unwrap_or("Personal");
-        egui::ComboBox::from_id_salt(id).selected_text(name).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt(id).selected_text(name).icon(crate::chrome::updown).show_ui(ui, |ui| {
             for calendar in &self.calendars {
                 ui.selectable_value(&mut self.selected, calendar.id, &calendar.name);
             }

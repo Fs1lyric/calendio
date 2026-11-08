@@ -1,5 +1,7 @@
 //! The event editor: a modal over the calendar that edits a [`Form`].
 
+use crate::chrome;
+use crate::clock::Clock;
 use crate::form::{parse_time, Ends, Form, Repeat, Save, Scope};
 use crate::grid::{self, View};
 use crate::theme;
@@ -27,6 +29,7 @@ pub struct Editor {
     pub calendars: Vec<calendio_core::calendars::Calendar>,
     /// The stored event when editing one.
     series: Option<Event>,
+    clock: Clock,
     start_time: String,
     end_time: String,
     count: String,
@@ -45,7 +48,7 @@ const REMINDERS: [(Option<i64>, &str); 7] = [
 ];
 
 impl Editor {
-    pub fn new(form: Form, series: Option<Event>) -> Self {
+    pub fn new(form: Form, series: Option<Event>, clock: Clock) -> Self {
         let count = match form.ends {
             Ends::After(n) => n.to_string(),
             _ => "10".into(),
@@ -54,8 +57,9 @@ impl Editor {
             details: calendio_core::details::EventDetails { busy: !form.all_day, ..Default::default() },
             calendar_id: 1,
             calendars: Vec::new(),
-            start_time: form.start.format("%H:%M").to_string(),
-            end_time: form.end.format("%H:%M").to_string(),
+            clock,
+            start_time: clock.field(form.start.time()),
+            end_time: clock.field(form.end.time()),
             count,
             form,
             series,
@@ -73,8 +77,12 @@ impl Editor {
         if self.form.all_day {
             return Ok(());
         }
-        let start = parse_time(&self.start_time).ok_or("the start time should look like 09:30")?;
-        let end = parse_time(&self.end_time).ok_or("the end time should look like 10:30")?;
+        let start = parse_time(&self.start_time).ok_or_else(|| {
+            format!("the start time should look like {}", self.clock.field(NaiveTime::from_hms_opt(9, 30, 0).unwrap()))
+        })?;
+        let end = parse_time(&self.end_time).ok_or_else(|| {
+            format!("the end time should look like {}", self.clock.field(NaiveTime::from_hms_opt(10, 30, 0).unwrap()))
+        })?;
         self.form.start = self.form.start.date().and_time(start);
         // An end at or before the start on the same date means the next day.
         let mut end_at = self.form.end.date().and_time(end);
@@ -111,11 +119,14 @@ impl Editor {
                     .find(|c| c.id == self.calendar_id)
                     .map(|c| c.name.as_str())
                     .unwrap_or("Personal");
-                egui::ComboBox::from_id_salt("event-calendar").selected_text(name).show_ui(ui, |ui| {
-                    for calendar in &self.calendars {
-                        ui.selectable_value(&mut self.calendar_id, calendar.id, &calendar.name);
-                    }
-                });
+                egui::ComboBox::from_id_salt("event-calendar").selected_text(name).icon(chrome::updown).show_ui(
+                    ui,
+                    |ui| {
+                        for calendar in &self.calendars {
+                            ui.selectable_value(&mut self.calendar_id, calendar.id, &calendar.name);
+                        }
+                    },
+                );
                 ui.add_space(10.0);
                 if self.asking.is_some() {
                     if let Some(error) = &self.error {
@@ -148,8 +159,8 @@ impl Editor {
             theme::hex(self.calendars.iter().find(|c| c.id == self.calendar_id).map(|c| c.color.as_str()));
         let f = &mut self.form;
         let title = egui::TextEdit::singleline(&mut f.title)
-            .hint_text("Add a title")
-            .font(egui::FontId::proportional(20.0))
+            .hint_text("New Event")
+            .font(theme::semibold(22.0))
             .frame(egui::Frame::NONE)
             .desired_width(f32::INFINITY);
         let title = ui.add(title);
@@ -170,7 +181,7 @@ impl Editor {
                     f.end = f.start + length;
                 }
                 if !f.all_day {
-                    ui.add(egui::TextEdit::singleline(&mut self.start_time).desired_width(56.0));
+                    ui.add(egui::TextEdit::singleline(&mut self.start_time).desired_width(74.0));
                 }
             });
             ui.end_row();
@@ -182,20 +193,27 @@ impl Editor {
                     f.end = day.and_time(f.end.time());
                 }
                 if !f.all_day {
-                    ui.add(egui::TextEdit::singleline(&mut self.end_time).desired_width(56.0));
+                    ui.add(egui::TextEdit::singleline(&mut self.end_time).desired_width(74.0));
                 }
             });
             ui.end_row();
 
             ui.label("");
             let was = f.all_day;
-            ui.checkbox(&mut f.all_day, "All day");
+            // Apple's All-day box is a small rounded square, not a pill.
+            ui.scope(|ui| {
+                let w = &mut ui.visuals_mut().widgets;
+                for v in [&mut w.inactive, &mut w.hovered, &mut w.active] {
+                    v.corner_radius = CornerRadius::same(3);
+                }
+                ui.checkbox(&mut f.all_day, "All-day");
+            });
             if was != f.all_day && !f.all_day {
                 // Back to timed: give it an hour at nine on the first day.
                 f.start = f.start.date().and_time(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
                 f.end = f.start + Duration::hours(1);
-                self.start_time = "09:00".into();
-                self.end_time = "10:00".into();
+                self.start_time = self.clock.field(f.start.time());
+                self.end_time = self.clock.field(f.end.time());
             } else if was != f.all_day {
                 f.end = f.end.date().and_time(NaiveTime::MIN);
                 f.start = f.start.date().and_time(NaiveTime::MIN);
@@ -234,6 +252,7 @@ impl Editor {
             ui.label(RichText::new("Repeat").color(theme::ink_2()));
             ui.vertical(|ui| {
                 egui::ComboBox::from_id_salt("repeat")
+                    .icon(chrome::updown)
                     .selected_text(f.repeat.label().to_string())
                     .width(200.0)
                     .show_ui(ui, |ui| {
@@ -276,11 +295,14 @@ impl Editor {
 
             ui.label(RichText::new("Reminder").color(theme::ink_2()));
             let current = REMINDERS.iter().find(|r| r.0 == f.reminder_minutes).map_or("Custom", |r| r.1);
-            egui::ComboBox::from_id_salt("reminder").selected_text(current).width(200.0).show_ui(ui, |ui| {
-                for (minutes, label) in REMINDERS {
-                    ui.selectable_value(&mut f.reminder_minutes, minutes, label);
-                }
-            });
+            egui::ComboBox::from_id_salt("reminder").icon(chrome::updown).selected_text(current).width(200.0).show_ui(
+                ui,
+                |ui| {
+                    for (minutes, label) in REMINDERS {
+                        ui.selectable_value(&mut f.reminder_minutes, minutes, label);
+                    }
+                },
+            );
             ui.end_row();
 
             ui.vertical(|ui| {
@@ -423,4 +445,23 @@ pub fn date_button(ui: &mut egui::Ui, salt: &str, day: &mut NaiveDate) -> bool {
         ui.data_mut(|d| d.remove::<NaiveDate>(shown_key));
     }
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clock::Clock;
+
+    #[test]
+    fn time_boxes_follow_the_clock() {
+        let start = chrono::NaiveDate::from_ymd_opt(2026, 11, 7).unwrap().and_hms_opt(18, 0, 0).unwrap();
+        let form = Form::new(start, start + Duration::hours(1), false, chrono_tz::UTC);
+        let editor = Editor::new(form.clone(), None, Clock::H12);
+        assert_eq!((editor.start_time.as_str(), editor.end_time.as_str()), ("6:00 PM", "7:00 PM"));
+        let mut editor = Editor::new(form, None, Clock::H24);
+        assert_eq!(editor.start_time, "18:00");
+        editor.start_time = "6:30 PM".into();
+        editor.read_times().unwrap();
+        assert_eq!(editor.form.start.time(), chrono::NaiveTime::from_hms_opt(18, 30, 0).unwrap());
+    }
 }
