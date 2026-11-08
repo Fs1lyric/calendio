@@ -109,11 +109,17 @@ impl Db {
                 "Manage booked events from Booking, so guest details and availability stay consistent",
             ));
         }
+        if before.as_ref().map(|s| self.is_subscribed(s.calendar_id)).transpose()?.unwrap_or(false) {
+            return Err(invalid("Subscribed calendars are read-only"));
+        }
         let changed = action(self)?;
         if id.is_some_and(|id| id != changed) {
             return Err(invalid("An edit changed the wrong event"));
         }
         let after = if self.event(changed)?.is_some() { Some(self.snapshot(changed)?) } else { None };
+        if after.as_ref().map(|s| self.is_subscribed(s.calendar_id)).transpose()?.unwrap_or(false) {
+            return Err(invalid("Subscribed calendars are read-only"));
+        }
         if after.as_ref().is_some_and(|s| s.event.booking_id.is_some()) {
             return Err(invalid("Bookings cannot be edited through event undo"));
         }
@@ -302,7 +308,7 @@ pub fn list_backups(directory: &Path) -> Vec<BackupFile> {
     let Ok(entries) = std::fs::read_dir(directory) else { return Vec::new() };
     let mut list: Vec<_> = entries.flatten().filter_map(|e| parse_backup(e.path())).collect();
     // A timed copy from today sorts above today's daily file: it was taken later.
-    list.sort_by(|a, b| (b.date, b.time.is_some(), b.time, b.kind).cmp(&(a.date, a.time.is_some(), a.time, a.kind)));
+    list.sort_by_key(|b| std::cmp::Reverse((b.date, b.time.is_some(), b.time, b.kind)));
     list
 }
 /// "Today", "Yesterday", "Tue 3 Nov", plus the local time for timed copies.
