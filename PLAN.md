@@ -98,3 +98,56 @@ live in `main.rs` `mod frames` (`Harness`, `text_rects`, `circles`, `rects`,
 
 Done when CI is green and the year, agenda, month and 1500-wide shots look like
 Apple Calendar in light and dark.
+
+---
+
+# Finish line (decided 2026-11-08)
+
+Calendio is the user's only daily app. "Finished" = these three, nothing else from
+ROADMAP.md. Same rules: test first, push, read CI; never build or launch locally
+(screenshots come from the CI `screenshots` job). Commit as `Fs1lyric <roohlyric57@gmail.com>`
+(set per repo), no AI attribution lines.
+
+## A. Backups you can trust (small)
+Already there: booker `workers.rs` calls `Db::daily_backup` (core `recovery.rs`) into
+`~/.local/share/calendio/backups/calendio-YYYY-MM-DD.sqlite3`; restore lives in the `…`
+menu's "Undo & backups" (`recovery_ui.rs`, one very long line per row; reformat it).
+1. Keep the newest 30 daily files: `Db::prune_backups(dir, keep)`; call it after
+   `daily_backup`. Test: 35 dated files in a temp dir → 30 left, the oldest gone, other
+   files (e.g. `pre-claude-*.db`) untouched.
+2. Off-disk copy: optional setting `backup_mirror` (a folder, e.g. a USB stick or a
+   synced cloud folder); after the daily backup, copy the file there too. Test with
+   two temp dirs.
+3. Restore picker: list the backups newest first ("Today", "Yesterday", "Mon 3 Nov")
+   with a Restore button each, instead of a typed path. Keep the safety backup and
+   the confirm checkbox.
+
+## B. Subscribed calendars (medium, new)
+Add any `webcal://`/`https://` iCal URL as a read-only calendar that refreshes itself.
+1. Core: `calendars.subscription_url`, `last_fetched`, `etag` columns (migration test);
+   `Db::replace_subscription(calendar_id, ics)` that swaps the calendar's events in
+   one transaction using the existing `import_ics` parser. Test: re-importing a
+   changed feed updates/removes events, never duplicates.
+2. Booker worker: every 6 h (and on demand) fetch each URL with `If-None-Match`,
+   size cap 5 MB, 20 s timeout, then `replace_subscription`. Test the worker with a
+   fake fetcher (see `google.rs` `Api` trait for the pattern).
+3. App: "New Subscription…" in the sidebar menu (URL + name + colour via
+   `swatches.rs`); subscribed calendars show a small ↻ glyph and their events open
+   read-only in the editor (no Save, no drag). Tests: editor read-only, drag ignored.
+4. Seed the demo DB with a holidays feed fixture so CI screenshots show one.
+
+## C. Google two-way sync (code exists; needs setup)
+Already there: booker `google.rs` (windowed incremental pull, ETag-guarded writes),
+`google_auth.rs` (`calendio-booker --google-connect`, PKCE, reads
+`CALENDIO_GOOGLE_CLIENT_ID` / `_SECRET`), "Connect Google Calendar" button.
+1. User step (cannot be done by Claude): Google Cloud Console → new project → enable
+   Google Calendar API → OAuth consent screen (External, add own address as test
+   user) → Credentials → OAuth client ID, type **Desktop app**. Paste ID + secret.
+2. Store them in `~/.config/calendio/google.env` (0600) and add
+   `EnvironmentFile=-%h/.config/calendio/google.env` to the `calendio-booker` unit
+   in `packaging/` + install.sh; the app's Connect button passes the same env.
+3. Settings shows the real `google_status`, last sync time and the error if any.
+4. Verify for real: connect, make an event on the phone → appears in Calendio within
+   a minute; edit in Calendio → appears on the phone.
+
+Order: A, then B, then C (C waits on the user's credentials).
