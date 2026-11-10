@@ -250,28 +250,38 @@ pub struct EventColors {
     pub fill: Color32,
     pub bar: Color32,
     pub title: Color32,
+    /// The time and location lines under the title.
+    pub detail: Color32,
 }
 
-/// Apple Calendar's event block: the calendar colour at 18% (30% on dark)
-/// with a solid bar and a title shaded from the colour until it reads at 4.5:1.
-/// Selected, the block is solid with white text, unless the colour is too pale.
+/// Apple Calendar's event block, as measured from Apple's iPad screenshots:
+/// the calendar colour at 15% (30% on dark) with a solid bar, a title mixed
+/// halfway to black (further if it still doesn't read at 4.5:1) and a lighter
+/// time line. Selected, the block is solid with white text, unless the colour
+/// is too pale.
 pub fn event_colors(colour: Color32, selected: bool) -> EventColors {
     if selected {
         let title = if contrast(Color32::WHITE, colour) >= 2.0 {
             Color32::WHITE
         } else {
-            readable_shade(colour, colour, Color32::BLACK)
+            readable_shade(colour, colour, Color32::BLACK, 0.35)
         };
-        return EventColors { fill: colour, bar: colour, title };
+        return EventColors { fill: colour, bar: colour, title, detail: title };
     }
-    let (alpha, toward) = if is_dark() { (0.30, Color32::WHITE) } else { (0.18, Color32::BLACK) };
-    let fill = bg().lerp_to_gamma(colour, alpha);
-    EventColors { fill, bar: colour, title: readable_shade(colour, fill, toward) }
+    if is_dark() {
+        let fill = bg().lerp_to_gamma(colour, 0.30);
+        let title = readable_shade(colour, fill, Color32::WHITE, 0.35);
+        return EventColors { fill, bar: colour, title, detail: title };
+    }
+    let fill = bg().lerp_to_gamma(colour, 0.15);
+    let title = readable_shade(colour, fill, Color32::BLACK, 0.5);
+    let detail = colour.lerp_to_gamma(Color32::BLACK, 0.2);
+    EventColors { fill, bar: colour, title, detail }
 }
 
 /// `colour` mixed towards `toward`, a little at a time, until it reads on `on`.
-fn readable_shade(colour: Color32, on: Color32, toward: Color32) -> Color32 {
-    let mut t = 0.35;
+fn readable_shade(colour: Color32, on: Color32, toward: Color32, start: f32) -> Color32 {
+    let mut t = start;
     loop {
         let shade = colour.lerp_to_gamma(toward, t);
         if contrast(shade, on) >= 4.5 || t >= 1.0 {
@@ -281,50 +291,55 @@ fn readable_shade(colour: Color32, on: Color32, toward: Color32) -> Color32 {
     }
 }
 
-/// Time block and calendar colours, stored as `#rrggbb`: Apple Calendar's
-/// seven calendar colours, exactly as iCloud stores them. Apple draws them the
-/// same on light and dark.
+/// Time block and calendar colours, stored as `#rrggbb`: iPadOS 26 Calendar's
+/// seven calendar colours, which are iOS 26's system colours (sampled from
+/// Apple's own screenshots in spec/reference/ipad).
 pub const SWATCHES: [(&str, &str); 7] = [
-    ("Red", "#ff2968"),
-    ("Orange", "#ff9500"),
+    ("Red", "#ff383c"),
+    ("Orange", "#ff8d28"),
     ("Yellow", "#ffcc00"),
-    ("Green", "#63da38"),
-    ("Blue", "#1badf8"),
-    ("Purple", "#cc73e1"),
-    ("Brown", "#a2845e"),
+    ("Green", "#34c759"),
+    ("Blue", "#0088ff"),
+    ("Purple", "#cb30e0"),
+    ("Brown", "#ac7f5e"),
 ];
 
 /// Colours Calendio used to offer (system colours, the old calendar defaults
 /// and the pastels), each drawn as its nearest Apple Calendar colour so old
 /// blocks match without rewriting anyone's data.
-const LEGACY: [(u32, u32); 21] = [
-    (0x2457b2, 0x1badf8),
-    (0x007aff, 0x1badf8),
-    (0x32ade6, 0x1badf8),
-    (0x30b0c7, 0x1badf8),
-    (0x00c7be, 0x63da38),
-    (0x34c759, 0x63da38),
-    (0xff3b30, 0xff2968),
-    (0xff2d55, 0xff2968),
-    (0x5856d6, 0xcc73e1),
-    (0xaf52de, 0xcc73e1),
-    (0x8e8e93, 0xa2845e),
-    (0xd64933, 0xff2968),
-    (0x2e8b57, 0x63da38),
-    (0x8a4fd8, 0xcc73e1),
-    (0xf4c3e8, 0xcc73e1),
-    (0xf48aab, 0xff2968),
-    (0xa5e0ca, 0x63da38),
+const LEGACY: [(u32, u32); 26] = [
+    (0x2457b2, 0x0088ff),
+    (0x1badf8, 0x0088ff),
+    (0xff2968, 0xff383c),
+    (0x63da38, 0x34c759),
+    (0xcc73e1, 0xcb30e0),
+    (0xff9500, 0xff8d28),
+    (0xa2845e, 0xac7f5e),
+    (0x007aff, 0x0088ff),
+    (0x32ade6, 0x0088ff),
+    (0x30b0c7, 0x0088ff),
+    (0x00c7be, 0x34c759),
+    (0xff3b30, 0xff383c),
+    (0xff2d55, 0xff383c),
+    (0x5856d6, 0xcb30e0),
+    (0xaf52de, 0xcb30e0),
+    (0x8e8e93, 0xac7f5e),
+    (0xd64933, 0xff383c),
+    (0x2e8b57, 0x34c759),
+    (0x8a4fd8, 0xcb30e0),
+    (0xf4c3e8, 0xcb30e0),
+    (0xf48aab, 0xff383c),
+    (0xa5e0ca, 0x34c759),
     (0xf5dfb4, 0xffcc00),
-    (0x89b3f9, 0x1badf8),
-    (0x96dfcd, 0x63da38),
-    (0xb2bad1, 0xa2845e),
+    (0x89b3f9, 0x0088ff),
+    (0x96dfcd, 0x34c759),
+    (0xb2bad1, 0xac7f5e),
 ];
 
 /// A stored `#rrggbb` as the colour to paint: Apple's dark variant on a dark
 /// canvas, otherwise as stored.
 pub fn hex(s: Option<&str>) -> Color32 {
-    let c = s.and_then(|s| Color32::from_hex(&s.to_lowercase()).ok()).unwrap_or(Color32::from_rgb(0x1b, 0xad, 0xf8));
+    let c = s.and_then(|s| Color32::from_hex(&s.to_lowercase()).ok()).unwrap_or(Color32::from_rgb(0x00, 0x88, 0xff));
     let n = u32::from(c.r()) << 16 | u32::from(c.g()) << 8 | u32::from(c.b());
     match LEGACY.iter().find(|(old, _)| *old == n) {
         Some(&(_, apple)) => Color32::from_rgb((apple >> 16) as u8, (apple >> 8) as u8, apple as u8),
@@ -453,27 +468,32 @@ mod tests {
     #[test]
     fn old_colours_are_drawn_as_their_apple_calendar_colour() {
         let pairs = [
-            ("#2457b2", "#1badf8"), // the old Personal navy
-            ("#007aff", "#1badf8"),
-            ("#32ade6", "#1badf8"),
-            ("#30b0c7", "#1badf8"),
-            ("#00c7be", "#63da38"),
-            ("#34c759", "#63da38"),
-            ("#ff3b30", "#ff2968"),
-            ("#ff2d55", "#ff2968"),
-            ("#5856d6", "#cc73e1"),
-            ("#af52de", "#cc73e1"),
-            ("#8e8e93", "#a2845e"),
-            ("#d64933", "#ff2968"),
-            ("#2e8b57", "#63da38"),
-            ("#8a4fd8", "#cc73e1"),
-            ("#f4c3e8", "#cc73e1"), // Lilac
-            ("#f48aab", "#ff2968"), // Blush
-            ("#a5e0ca", "#63da38"), // Seafoam
+            ("#2457b2", "#0088ff"), // the old Personal navy
+            ("#1badf8", "#0088ff"), // iCloud's older calendar colours
+            ("#ff2968", "#ff383c"),
+            ("#63da38", "#34c759"),
+            ("#cc73e1", "#cb30e0"),
+            ("#ff9500", "#ff8d28"),
+            ("#a2845e", "#ac7f5e"),
+            ("#007aff", "#0088ff"), // iOS 18 system colours
+            ("#32ade6", "#0088ff"),
+            ("#30b0c7", "#0088ff"),
+            ("#00c7be", "#34c759"),
+            ("#ff3b30", "#ff383c"),
+            ("#ff2d55", "#ff383c"),
+            ("#5856d6", "#cb30e0"),
+            ("#af52de", "#cb30e0"),
+            ("#8e8e93", "#ac7f5e"),
+            ("#d64933", "#ff383c"),
+            ("#2e8b57", "#34c759"),
+            ("#8a4fd8", "#cb30e0"),
+            ("#f4c3e8", "#cb30e0"), // Lilac
+            ("#f48aab", "#ff383c"), // Blush
+            ("#a5e0ca", "#34c759"), // Seafoam
             ("#f5dfb4", "#ffcc00"), // Cream
-            ("#89b3f9", "#1badf8"), // Sky
-            ("#96dfcd", "#63da38"), // Aqua
-            ("#b2bad1", "#a2845e"), // Slate
+            ("#89b3f9", "#0088ff"), // Sky
+            ("#96dfcd", "#34c759"), // Aqua
+            ("#b2bad1", "#ac7f5e"), // Slate
         ];
         for theme in [Theme::AppleLight, Theme::AppleDark] {
             theme.apply(&egui::Context::default());
@@ -485,7 +505,7 @@ mod tests {
             for (_, apple) in SWATCHES {
                 assert_eq!(hex(Some(apple)), Color32::from_hex(apple).unwrap(), "{apple} in {theme:?}");
             }
-            assert_eq!(hex(None), rgb(0x1badf8), "no colour is Apple Calendar blue");
+            assert_eq!(hex(None), rgb(0x0088ff), "no colour is Apple Calendar blue");
         }
         Theme::AppleLight.apply(&egui::Context::default());
         assert_eq!(hex(Some("#123456")), rgb(0x123456), "a custom colour is left alone");
@@ -501,7 +521,10 @@ mod tests {
 
     #[test]
     fn event_blocks_are_tinted_with_a_solid_bar_and_a_darker_readable_title() {
-        for (theme, alpha) in [(Theme::AppleLight, 0.18), (Theme::AppleDark, 0.30)] {
+        // Light numbers measured from Apple's iPad Calendar screenshots: the fill
+        // is the colour at about 15% on white, the title the colour mixed
+        // halfway to black, and the time line lighter than the title.
+        for (theme, alpha) in [(Theme::AppleLight, 0.15), (Theme::AppleDark, 0.30)] {
             theme.apply(&egui::Context::default());
             for colour in event_palette() {
                 let c = event_colors(colour, false);
@@ -511,6 +534,12 @@ mod tests {
                 assert_ne!(c.title, ink(), "the title is a shade of the calendar colour, not plain ink");
                 if theme == Theme::AppleLight {
                     assert!(luminance(c.title) < luminance(colour), "light theme titles are darker than the colour");
+                    if contrast(colour.lerp_to_gamma(Color32::BLACK, 0.5), c.fill) >= 4.5 {
+                        assert_eq!(c.title, colour.lerp_to_gamma(Color32::BLACK, 0.5), "{colour:?} title");
+                    }
+                    assert!(luminance(c.detail) > luminance(c.title), "{colour:?} time line is lighter");
+                } else {
+                    assert_eq!(c.detail, c.title);
                 }
             }
         }

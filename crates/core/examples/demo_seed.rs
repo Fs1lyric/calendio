@@ -30,9 +30,9 @@ fn main() {
     let existing: i64 = db.conn().query_row("SELECT count(*) FROM events", [], |r| r.get(0)).unwrap();
     assert_eq!(existing, 0, "{} already has events; demo_seed only fills an empty database", path.display());
 
-    let work = db.create_calendar("Work", "#ff2968").unwrap();
-    let health = db.create_calendar("Health", "#63da38").unwrap();
-    let home = db.create_calendar("Home", "#cc73e1").unwrap();
+    let work = db.create_calendar("Work", "#ff383c").unwrap();
+    let health = db.create_calendar("Health", "#34c759").unwrap();
+    let home = db.create_calendar("Home", "#cb30e0").unwrap();
 
     let today = Utc::now().date_naive();
     let monday = today - Duration::days(today.weekday().num_days_from_monday() as i64);
@@ -56,10 +56,10 @@ fn main() {
     ];
     // A few blocks wear their own colour, the rest their calendar's.
     let own = [
-        ("Focus time", "#ff9500"),
-        ("Read", "#cc73e1"),
-        ("Lunch with Zara", "#ff2968"),
-        ("Standup", "#1badf8"),
+        ("Focus time", "#ff8d28"),
+        ("Read", "#cb30e0"),
+        ("Lunch with Zara", "#ff383c"),
+        ("Standup", "#0088ff"),
         ("Dentist", "#ffcc00"),
     ];
     for (calendar, input) in &events {
@@ -76,7 +76,7 @@ fn main() {
     db.create_event_in_calendar(&gym, health).unwrap();
 
     // A subscribed holidays feed, as the booking service would have fetched it.
-    let holidays = db.create_subscription("Holidays", "#63da38", "webcal://example.com/holidays.ics").unwrap();
+    let holidays = db.create_subscription("Holidays", "#34c759", "webcal://example.com/holidays.ics").unwrap();
     let mut feed = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Calendio demo//EN\r\n");
     for (uid, day, title) in [("founders", d(2), "Founders' Day"), ("harvest", d(12), "Harvest Festival")] {
         feed.push_str(&format!(

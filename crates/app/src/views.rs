@@ -90,10 +90,11 @@ fn event_block(ui: &Ui, rect: Rect, color: Color32, b: Block) {
     let title = p.layout_no_wrap(b.title.to_owned(), theme::semibold(12.0), ink);
     let mut y = rect.top() + 3.0 + title.size().y;
     p.galley(Pos2::new(x, rect.top() + 3.0), title, ink);
+    let detail = if b.faded { c.detail.gamma_multiply(0.55) } else { c.detail };
     if let Some(time) = b.time {
-        let time = p.layout_no_wrap(time, font(11.0), ink);
+        let time = p.layout_no_wrap(time, font(11.0), detail);
         let height = time.size().y;
-        p.galley(Pos2::new(x, y), time, ink);
+        p.galley(Pos2::new(x, y), time, detail);
         y += height;
     }
     if let Some(notes) = b.notes {
@@ -1180,7 +1181,7 @@ mod tests {
 
     #[test]
     fn right_clicking_a_block_offers_every_colour_and_picking_one_recolours_it() {
-        let occ = [event(7, "Standup", "2026-10-21T09:00:00Z", "2026-10-21T10:00:00Z", "#1badf8")];
+        let occ = [event(7, "Standup", "2026-10-21T09:00:00Z", "2026-10-21T10:00:00Z", "#0088ff")];
         let context = egui::Context::default();
         theme::Theme::AppleLight.apply(&context);
         let monday = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
@@ -1232,7 +1233,7 @@ mod tests {
         run(vec![click(orange, egui::PointerButton::Primary, true)]);
         let (_, action) = run(vec![click(orange, egui::PointerButton::Primary, false)]);
         match action {
-            Some(Action::Recolour { index: 0, colour }) => assert_eq!(colour.as_deref(), Some("#ff9500")),
+            Some(Action::Recolour { index: 0, colour }) => assert_eq!(colour.as_deref(), Some("#ff8d28")),
             _ => panic!("picking Orange recolours the block"),
         }
     }
@@ -1569,8 +1570,8 @@ mod tests {
 
     #[test]
     fn month_all_day_events_are_solid_pills() {
-        let purple = Color32::from_rgb(0xcc, 0x73, 0xe1);
-        let (shapes, screen) = month_frame(&[event(2, "Trip", "2026-10-23", "2026-10-25", "#cc73e1")]);
+        let purple = Color32::from_rgb(0xcb, 0x30, 0xe0);
+        let (shapes, screen) = month_frame(&[event(2, "Trip", "2026-10-23", "2026-10-25", "#cb30e0")]);
         let texts = crate::frames::text_rects(&shapes, screen);
         let trips = crate::frames::find(&texts, "Trip");
         assert_eq!(trips.len(), 1, "one joined pill labels the trip once");

@@ -157,17 +157,18 @@ mod tests {
 
     #[test]
     fn the_picker_offers_exactly_apple_calendars_seven_colours() {
-        // Apple Calendar's calendar colours, as iCloud stores them.
+        // iPadOS 26 Calendar's calendar colours: iOS 26's system colours, sampled
+        // from Apple's own iPad Calendar screenshots (spec/reference/ipad).
         assert_eq!(
             theme::SWATCHES,
             [
-                ("Red", "#ff2968"),
-                ("Orange", "#ff9500"),
+                ("Red", "#ff383c"),
+                ("Orange", "#ff8d28"),
                 ("Yellow", "#ffcc00"),
-                ("Green", "#63da38"),
-                ("Blue", "#1badf8"),
-                ("Purple", "#cc73e1"),
-                ("Brown", "#a2845e"),
+                ("Green", "#34c759"),
+                ("Blue", "#0088ff"),
+                ("Purple", "#cb30e0"),
+                ("Brown", "#ac7f5e"),
             ]
         );
     }
@@ -185,10 +186,10 @@ mod tests {
     #[test]
     fn clicking_a_swatch_picks_it_and_checks_it() {
         let mut colour = None;
-        let blue = theme::hex(Some("#1badf8"));
+        let blue = theme::hex(Some("#0088ff"));
         let at = circle_of(&run(&mut colour.clone(), None, None), blue);
         let shapes = run(&mut colour, None, Some(at));
-        assert_eq!(colour.as_deref(), Some("#1badf8"));
+        assert_eq!(colour.as_deref(), Some("#0088ff"));
         let near_blue = crate::frames::flat(&shapes).into_iter().any(|(_, s)| match s {
             egui::Shape::Path(p) => {
                 p.points.iter().all(|q| q.distance(at) < RADIUS)

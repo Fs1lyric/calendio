@@ -1390,7 +1390,7 @@ mod sidebar_tests {
         assert!(header.left() < SIDEBAR);
         let mut above = header.bottom();
         for (name, colour, visible) in
-            [("Personal", "#1badf8", true), ("Work", "#ff9500", true), ("Hobbies", "#63da38", false)]
+            [("Personal", "#0088ff", true), ("Work", "#ff8d28", true), ("Hobbies", "#34c759", false)]
         {
             let rect = one(&texts, name);
             assert!(rect.left() < SIDEBAR && rect.top() >= above, "{name} is listed under My Calendars, in order");
