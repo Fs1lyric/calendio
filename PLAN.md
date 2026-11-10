@@ -171,3 +171,22 @@ Order: A, then B, then C (C waits on the user's credentials).
   fine; core + booker tests never ran. Next: get one green run, merge to main, install.
 - Left for the user: C1 (Google Cloud Desktop OAuth client → google.env), C4 (real
   phone round trip).
+
+# Exact iPad Calendar (next session: start here)
+
+User, 2026-11-10: "exact apple colour, exact interface, exact EVERYTHING", copying **iPadOS Calendar**
+(the one productivity YouTubers show), not macOS. Exact look, no Lyric Mono styling.
+
+Done on branch `more-apple` (pushed, installed with `./install.sh --build`, not merged to main):
+- Year view fits 12 months (4 per row); Day view right-hand pane (`views::day_pane`).
+- Exact Apple Calendar colours: `theme::SWATCHES` = the 7 iCloud calendar colours, same on light/dark;
+  `theme::LEGACY` maps older stored colours onto them at draw time (no data rewrite).
+
+Before pixel work: reference screenshots go in `spec/reference/ipad/` (Day, Week, Month, Year, event
+detail/editor, calendars list; light + dark). Measure from them (fonts, sizes, paddings, colours of
+grid lines, fills, today marker, toolbar) and write the numbers into `spec/reference/ipad/NOTES.md`,
+then match view by view, test first, screenshot-compare each.
+
+Testing while GitHub Actions is billing-blocked: local headless only (`nice cargo test -j 4`,
+`tests/screenshots.sh` under Xvfb, now installed). The app runs at zoom 1.25: layout numbers and
+test screens are in points (1180x780 px = 944x624 pt).
