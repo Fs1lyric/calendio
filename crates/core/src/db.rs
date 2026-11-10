@@ -122,7 +122,7 @@ CREATE TABLE calendars (
     color TEXT NOT NULL,
     visible INTEGER NOT NULL DEFAULT 1
 );
-INSERT INTO calendars (id, name, color) VALUES (1, 'Personal', '#2457b2');
+INSERT INTO calendars (id, name, color) VALUES (1, 'Personal', '#007aff');
 ALTER TABLE events ADD COLUMN calendar_id INTEGER NOT NULL DEFAULT 1;
 -- SQLite cannot add a REFERENCES column with a non-null default to a
 -- populated table. Equivalent guards preserve integrity during migration.

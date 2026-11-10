@@ -962,8 +962,8 @@ mod tests {
 
     #[test]
     fn agenda_aligns_titles_left_times_right_and_leads_with_calendar_colour() {
-        let blue = Color32::from_rgb(0x24, 0x57, 0xb2);
-        let occ = [event(1, "Planning", "2026-01-19T09:00:00Z", "2026-01-19T10:00:00Z", "#2457b2")];
+        let blue = Color32::from_rgb(0x1f, 0x4f, 0xa8);
+        let occ = [event(1, "Planning", "2026-01-19T09:00:00Z", "2026-01-19T10:00:00Z", "#1f4fa8")];
         let (shapes, screen) = overview_frame(&occ, false);
         let texts = crate::frames::text_rects(&shapes, screen);
         let title = crate::frames::one(&texts, "Planning");
@@ -1059,9 +1059,9 @@ mod tests {
     #[test]
     fn day_pane_has_a_month_on_top_and_the_days_events_under_it() {
         let occ = [
-            event(1, "Planning", "2026-01-19T09:00:00Z", "2026-01-19T10:00:00Z", "#2457b2"),
+            event(1, "Planning", "2026-01-19T09:00:00Z", "2026-01-19T10:00:00Z", "#1f4fa8"),
             event(2, "Gym", "2026-01-19T07:00:00Z", "2026-01-19T08:00:00Z", "#34c759"),
-            event(3, "Tomorrow thing", "2026-01-20T09:00:00Z", "2026-01-20T10:00:00Z", "#2457b2"),
+            event(3, "Tomorrow thing", "2026-01-20T09:00:00Z", "2026-01-20T10:00:00Z", "#1f4fa8"),
         ];
         let shapes = day_pane_frame(&occ, None);
         let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(280.0, 700.0));
@@ -1074,7 +1074,7 @@ mod tests {
         assert!(crate::frames::find(&texts, "Tomorrow thing").is_empty(), "only the day's events");
         let time = crate::frames::one(&texts, "9 – 10 AM");
         assert!(time.top() > planning.top() && (time.left() - planning.left()).abs() < 2.0, "time under the title");
-        let blue = Color32::from_rgb(0x24, 0x57, 0xb2);
+        let blue = Color32::from_rgb(0x1f, 0x4f, 0xa8);
         assert!(
             crate::frames::rects(&shapes)
                 .iter()
@@ -1435,8 +1435,8 @@ mod tests {
 
     #[test]
     fn event_blocks_have_a_tinted_fill_a_left_bar_and_a_semibold_title_over_the_time() {
-        let blue = Color32::from_rgb(0x24, 0x57, 0xb2);
-        let (shapes, screen) = week_with(&[planning("#2457b2")], None, Clock::H12);
+        let blue = Color32::from_rgb(0x1f, 0x4f, 0xa8);
+        let (shapes, screen) = week_with(&[planning("#1f4fa8")], None, Clock::H12);
         let colours = theme::event_colors(blue, false);
         let texts = crate::frames::text_rects(&shapes, screen);
         let title = crate::frames::one(&texts, "Planning");
@@ -1456,9 +1456,9 @@ mod tests {
 
     #[test]
     fn the_selected_event_is_solid_with_white_text() {
-        let blue = Color32::from_rgb(0x24, 0x57, 0xb2);
+        let blue = Color32::from_rgb(0x1f, 0x4f, 0xa8);
         let selected = Some((7, "2026-10-22T09:00:00Z".to_owned()));
-        let (shapes, screen) = week_with(&[planning("#2457b2")], selected, Clock::H12);
+        let (shapes, screen) = week_with(&[planning("#1f4fa8")], selected, Clock::H12);
         let title = crate::frames::one(&crate::frames::text_rects(&shapes, screen), "Planning");
         block_under(&shapes, blue, title.center());
         assert_eq!(crate::frames::text_color(&shapes, "Planning", title.center()), Some(Color32::WHITE));
@@ -1504,8 +1504,8 @@ mod tests {
 
     #[test]
     fn month_cells_put_the_date_top_right_and_list_timed_events_as_dot_title_time() {
-        let blue = Color32::from_rgb(0x24, 0x57, 0xb2);
-        let occ = [event(1, "Planning", "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", "#2457b2")];
+        let blue = Color32::from_rgb(0x1f, 0x4f, 0xa8);
+        let occ = [event(1, "Planning", "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", "#1f4fa8")];
         let (shapes, screen) = month_frame(&occ);
         let texts = crate::frames::text_rects(&shapes, screen);
         let column = 1180.0 / 7.0;
@@ -1543,7 +1543,7 @@ mod tests {
 
     #[test]
     fn phone_width_month_cells_drop_the_time_so_the_title_shows() {
-        let occ = [event(1, "Planning", "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", "#2457b2")];
+        let occ = [event(1, "Planning", "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", "#1f4fa8")];
         let (shapes, screen) = month_at(&occ, 390.0);
         let texts = crate::frames::text_rects(&shapes, screen);
         crate::frames::one(&texts, "Planning");
@@ -1553,7 +1553,7 @@ mod tests {
     #[test]
     fn long_month_titles_end_in_an_ellipsis_before_the_time() {
         let title = "Quarterly planning review with the whole team";
-        let occ = [event(1, title, "2026-10-22T14:00:00Z", "2026-10-22T15:00:00Z", "#2457b2")];
+        let occ = [event(1, title, "2026-10-22T14:00:00Z", "2026-10-22T15:00:00Z", "#1f4fa8")];
         let (shapes, screen) = month_frame(&occ);
         let texts = crate::frames::text_rects(&shapes, screen);
         // The galley keeps the full string; what shows is cut, so measure the ink.

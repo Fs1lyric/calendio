@@ -30,9 +30,9 @@ fn main() {
     let existing: i64 = db.conn().query_row("SELECT count(*) FROM events", [], |r| r.get(0)).unwrap();
     assert_eq!(existing, 0, "{} already has events; demo_seed only fills an empty database", path.display());
 
-    let work = db.create_calendar("Work", "#d64933").unwrap();
-    let health = db.create_calendar("Health", "#2e8b57").unwrap();
-    let home = db.create_calendar("Home", "#8a4fd8").unwrap();
+    let work = db.create_calendar("Work", "#ff3b30").unwrap();
+    let health = db.create_calendar("Health", "#34c759").unwrap();
+    let home = db.create_calendar("Home", "#af52de").unwrap();
 
     let today = Utc::now().date_naive();
     let monday = today - Duration::days(today.weekday().num_days_from_monday() as i64);

@@ -33,7 +33,7 @@ fn swatch(ui: &mut Ui, fill: Color32, chosen: bool, name: &str) -> bool {
 
 /// The colour picker. `colour` is `None` for "the calendar's colour", which is
 /// offered first as `calendar` when given. Apple's colours sit on the first row,
-/// the softer ones on the second, then a custom colour. Returns whether it changed.
+/// then a custom colour. Returns whether it changed.
 pub fn picker(ui: &mut Ui, colour: &mut Option<String>, calendar: Option<Color32>) -> bool {
     let before = colour.clone();
     ui.vertical(|ui| {
@@ -44,18 +44,13 @@ pub fn picker(ui: &mut Ui, colour: &mut Option<String>, calendar: Option<Color32
                     *colour = None;
                 }
             }
-            for (name, hex) in &theme::SWATCHES[..theme::VIVID] {
+            for (name, hex) in &theme::SWATCHES {
                 if swatch(ui, theme::hex(Some(hex)), colour.as_deref().is_some_and(|c| same(c, hex)), name) {
                     *colour = Some((*hex).to_string());
                 }
             }
         });
         ui.horizontal_wrapped(|ui| {
-            for (name, hex) in &theme::SWATCHES[theme::VIVID..] {
-                if swatch(ui, theme::hex(Some(hex)), colour.as_deref().is_some_and(|c| same(c, hex)), name) {
-                    *colour = Some((*hex).to_string());
-                }
-            }
             let custom = colour.as_deref().is_some_and(|c| !theme::SWATCHES.iter().any(|(_, h)| same(c, h)));
             let current = colour.as_deref().map(|c| theme::hex(Some(c))).or(calendar).unwrap_or(theme::accent());
             let mut rgb = [current.r(), current.g(), current.b()];
@@ -161,9 +156,8 @@ mod tests {
     }
 
     #[test]
-    fn apple_colours_come_first_and_there_are_many_more_than_seven() {
-        assert!(theme::SWATCHES.len() >= 20, "time blocks get a full palette");
-        let names: Vec<&str> = theme::SWATCHES[..theme::VIVID].iter().map(|s| s.0).collect();
+    fn the_picker_offers_exactly_apples_thirteen_colours() {
+        let names: Vec<&str> = theme::SWATCHES.iter().map(|s| s.0).collect();
         assert_eq!(
             names,
             [
@@ -171,12 +165,9 @@ mod tests {
                 "Brown", "Graphite"
             ]
         );
-        let mut hexes: Vec<String> = theme::SWATCHES.iter().map(|s| s.1.to_lowercase()).collect();
-        hexes.sort();
-        hexes.dedup();
-        assert_eq!(hexes.len(), theme::SWATCHES.len(), "no colour twice");
-        // The old pastels stay so blocks already coloured with them still match.
-        assert!(theme::SWATCHES.iter().any(|s| s.1 == "#f5dfb4"));
+        // The old pastels are gone from the picker; blocks that still carry
+        // one are drawn in its Apple colour instead (see theme::hex).
+        assert!(!theme::SWATCHES.iter().any(|s| s.1 == "#f5dfb4"));
     }
 
     #[test]

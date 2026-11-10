@@ -282,9 +282,8 @@ fn readable_shade(colour: Color32, on: Color32, toward: Color32) -> Color32 {
 }
 
 /// Time block colours, stored on the event as `#rrggbb`: Apple Calendar's
-/// thirteen system colours first, then the softer pastels kept from before so
-/// blocks already coloured with them still match a swatch.
-pub const SWATCHES: [(&str, &str); 20] = [
+/// thirteen system colours.
+pub const SWATCHES: [(&str, &str); 13] = [
     ("Red", "#ff3b30"),
     ("Orange", "#ff9500"),
     ("Yellow", "#ffcc00"),
@@ -298,13 +297,23 @@ pub const SWATCHES: [(&str, &str); 20] = [
     ("Pink", "#ff2d55"),
     ("Brown", "#a2845e"),
     ("Graphite", "#8e8e93"),
-    ("Lilac", "#f4c3e8"),
-    ("Blush", "#f48aab"),
-    ("Seafoam", "#a5e0ca"),
-    ("Cream", "#f5dfb4"),
-    ("Sky", "#89b3f9"),
-    ("Aqua", "#96dfcd"),
-    ("Slate", "#b2bad1"),
+];
+
+/// Colours Calendio used to offer (the old calendar defaults and the seven
+/// pastels), each drawn as its nearest Apple system colour so old blocks look
+/// like Apple's without rewriting anyone's data.
+const LEGACY: [(u32, u32); 11] = [
+    (0x2457b2, 0x007aff),
+    (0xd64933, 0xff3b30),
+    (0x2e8b57, 0x34c759),
+    (0x8a4fd8, 0xaf52de),
+    (0xf4c3e8, 0xaf52de),
+    (0xf48aab, 0xff2d55),
+    (0xa5e0ca, 0x34c759),
+    (0xf5dfb4, 0xffcc00),
+    (0x89b3f9, 0x32ade6),
+    (0x96dfcd, 0x00c7be),
+    (0xb2bad1, 0x8e8e93),
 ];
 
 /// How many of [`SWATCHES`] are Apple's system colours.
@@ -331,14 +340,17 @@ const DARK_VARIANTS: [(u32, u32); VIVID] = [
 /// A stored `#rrggbb` as the colour to paint: Apple's dark variant on a dark
 /// canvas, otherwise as stored.
 pub fn hex(s: Option<&str>) -> Color32 {
-    let c = s.and_then(|s| Color32::from_hex(s).ok()).unwrap_or(Color32::from_rgb(0x89, 0xb3, 0xf9));
+    let c = s.and_then(|s| Color32::from_hex(&s.to_lowercase()).ok()).unwrap_or(Color32::from_rgb(0x00, 0x7a, 0xff));
+    let mut n = u32::from(c.r()) << 16 | u32::from(c.g()) << 8 | u32::from(c.b());
+    if let Some(&(_, apple)) = LEGACY.iter().find(|(old, _)| *old == n) {
+        n = apple;
+    }
     if is_dark() {
-        let n = u32::from(c.r()) << 16 | u32::from(c.g()) << 8 | u32::from(c.b());
         if let Some(&(_, d)) = DARK_VARIANTS.iter().find(|(l, _)| *l == n) {
-            return Color32::from_rgb((d >> 16) as u8, (d >> 8) as u8, d as u8);
+            n = d;
         }
     }
-    c
+    Color32::from_rgb((n >> 16) as u8, (n >> 8) as u8, n as u8)
 }
 
 /// A colour faded into the background, for event fills.
@@ -459,6 +471,35 @@ mod tests {
         assert_eq!(families[&egui::FontFamily::Name("bold".into())][0], "Inter Bold");
     }
 
+    #[test]
+    fn old_colours_are_drawn_as_their_apple_system_colour() {
+        let pairs = [
+            ("#2457b2", "#007aff"), // the old Personal navy
+            ("#d64933", "#ff3b30"),
+            ("#2e8b57", "#34c759"),
+            ("#8a4fd8", "#af52de"),
+            ("#f4c3e8", "#af52de"), // Lilac
+            ("#f48aab", "#ff2d55"), // Blush
+            ("#a5e0ca", "#34c759"), // Seafoam
+            ("#f5dfb4", "#ffcc00"), // Cream
+            ("#89b3f9", "#32ade6"), // Sky
+            ("#96dfcd", "#00c7be"), // Aqua
+            ("#b2bad1", "#8e8e93"), // Slate
+        ];
+        for theme in [Theme::AppleLight, Theme::AppleDark] {
+            theme.apply(&egui::Context::default());
+            for (old, apple) in pairs {
+                assert_eq!(hex(Some(old)), hex(Some(apple)), "{old} in {theme:?}");
+                assert_eq!(hex(Some(&old.to_uppercase())), hex(Some(apple)), "case does not matter");
+            }
+            // No colour at all is Apple blue too.
+            assert_eq!(hex(None), hex(Some("#007aff")));
+        }
+        // A custom colour the person picked is left alone.
+        Theme::AppleLight.apply(&egui::Context::default());
+        assert_eq!(hex(Some("#123456")), rgb(0x123456));
+    }
+
     /// Apple's system colours plus every swatch an event can pick.
     fn event_palette() -> Vec<Color32> {
         let mut colours: Vec<Color32> =
@@ -492,7 +533,7 @@ mod tests {
         Theme::AppleDark.apply(&egui::Context::default());
         assert_eq!(hex(Some("#ff3b30")), rgb(0xff453a));
         assert_eq!(hex(Some("#007aff")), rgb(0x0a84ff));
-        assert_eq!(hex(Some("#f5dfb4")), rgb(0xf5dfb4), "pastels and custom colours stay as stored");
+        assert_eq!(hex(Some("#123456")), rgb(0x123456), "custom colours stay as stored");
     }
 
     #[test]
