@@ -804,6 +804,90 @@ pub fn year(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
     action
 }
 
+/// Whether this occurrence touches `day` (an all-day end is exclusive).
+fn on_day(o: &Occurrence, day: NaiveDate, tz: Tz) -> bool {
+    if o.all_day {
+        let start = o.start.parse::<NaiveDate>().unwrap_or_default();
+        let end = o.end.parse::<NaiveDate>().unwrap_or(start + Duration::days(1));
+        start <= day && day < end.max(start + Duration::days(1))
+    } else {
+        grid::span_on(o, day, tz).is_some()
+    }
+}
+
+/// The right-hand pane of Apple's Day view: a large month to jump around in,
+/// the date, then the day's events in start order with their calendar colour
+/// and times. Clicking an event opens it.
+pub fn day_pane(ui: &mut Ui, s: &Scene, anchor: NaiveDate, nav: &mut crate::navigation::Navigation) -> Option<Action> {
+    let mut action = None;
+    ui.add_space(14.0);
+    if let Some(day) = nav.show(ui, View::Day, anchor, s.now.date()) {
+        action = Some(Action::Goto(day));
+    }
+    ui.add_space(10.0);
+    let (line, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().hline(line.x_range(), line.center().y, Stroke::new(1.0, theme::line()));
+    ui.add_space(10.0);
+    ui.label(
+        egui::RichText::new(anchor.format("%A, %-d %B").to_string()).font(theme::semibold(15.0)).color(theme::ink()),
+    );
+    ui.add_space(8.0);
+
+    let mut todays: Vec<usize> = (0..s.occ.len()).filter(|&k| on_day(&s.occ[k], anchor, s.tz)).collect();
+    todays.sort_by_key(|&k| (!s.occ[k].all_day, s.local_start(&s.occ[k])));
+    if todays.is_empty() {
+        ui.add_space(24.0);
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new("No Events").font(font(15.0)).color(theme::ink_3()));
+        });
+        return action;
+    }
+    egui::ScrollArea::vertical().id_salt("day-pane-events").show(ui, |ui| {
+        for k in todays {
+            let o = &s.occ[k];
+            let times = if o.all_day {
+                "All day".to_owned()
+            } else {
+                let (start, end) = (grid::local(&o.start, s.tz), grid::local(&o.end, s.tz));
+                if start.date() == end.date() {
+                    s.clock.range(start.time(), end.time())
+                } else {
+                    format!(
+                        "{} {} – {} {}",
+                        start.format("%-d %b"),
+                        s.clock.short(start.time()),
+                        end.format("%-d %b"),
+                        s.clock.short(end.time())
+                    )
+                }
+            };
+            let width = ui.available_width();
+            let title = ui.painter().layout(o.title.clone(), theme::semibold(13.0), theme::ink(), width - 22.0);
+            let time = ui.painter().layout_no_wrap(times, font(12.0), theme::ink_2());
+            let height = 8.0 + title.size().y + 2.0 + time.size().y + 8.0;
+            let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, height), Sense::click());
+            let p = ui.painter();
+            if s.is_selected(o) {
+                p.rect_filled(rect, CornerRadius::same(6), theme::tint());
+            } else if resp.hovered() {
+                p.rect_filled(rect, CornerRadius::same(6), theme::hover());
+            }
+            let colour = theme::hex(o.color.as_deref());
+            let bar =
+                Rect::from_min_size(Pos2::new(rect.left() + 6.0, rect.top() + 8.0), egui::vec2(3.0, height - 16.0));
+            p.rect_filled(bar, CornerRadius::same(2), colour);
+            let x = rect.left() + 16.0;
+            let title_h = title.size().y;
+            p.galley(Pos2::new(x, rect.top() + 8.0), title, theme::ink());
+            p.galley(Pos2::new(x, rect.top() + 10.0 + title_h), time, theme::ink_2());
+            if with_notes(resp, &o.notes).clicked() {
+                action = Some(Action::Open(k));
+            }
+        }
+    });
+    action
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -935,14 +1019,74 @@ mod tests {
         }
     }
 
+    fn day_pane_frame(occ: &[Occurrence], selected: Option<(i64, String)>) -> Vec<egui::epaint::ClippedShape> {
+        let context = egui::Context::default();
+        theme::Theme::AppleLight.apply(&context);
+        let day = NaiveDate::from_ymd_opt(2026, 1, 19).unwrap();
+        let scene =
+            Scene { occ, tz: chrono_tz::UTC, now: day.and_hms_opt(8, 0, 0).unwrap(), clock: Clock::H12, selected };
+        let mut nav = crate::navigation::Navigation::new(day);
+        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(280.0, 700.0));
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            let mut output = context.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+                day_pane(ui, &scene, day, &mut nav);
+            });
+            output.textures_delta.clear();
+            shapes = output.shapes;
+        }
+        shapes
+    }
+
+    #[test]
+    fn day_pane_has_a_month_on_top_and_the_days_events_under_it() {
+        let occ = [
+            event(1, "Planning", "2026-01-19T09:00:00Z", "2026-01-19T10:00:00Z", "#2457b2"),
+            event(2, "Gym", "2026-01-19T07:00:00Z", "2026-01-19T08:00:00Z", "#34c759"),
+            event(3, "Tomorrow thing", "2026-01-20T09:00:00Z", "2026-01-20T10:00:00Z", "#2457b2"),
+        ];
+        let shapes = day_pane_frame(&occ, None);
+        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(280.0, 700.0));
+        let texts = crate::frames::text_rects(&shapes, screen);
+        let header = crate::frames::one(&texts, "January 2026");
+        let gym = crate::frames::one(&texts, "Gym");
+        let planning = crate::frames::one(&texts, "Planning");
+        assert!(header.bottom() < gym.top(), "the month sits above the events");
+        assert!(gym.top() < planning.top(), "events run in start order");
+        assert!(crate::frames::find(&texts, "Tomorrow thing").is_empty(), "only the day's events");
+        let time = crate::frames::one(&texts, "9 – 10 AM");
+        assert!(time.top() > planning.top() && (time.left() - planning.left()).abs() < 2.0, "time under the title");
+        let blue = Color32::from_rgb(0x24, 0x57, 0xb2);
+        assert!(
+            crate::frames::rects(&shapes)
+                .iter()
+                .any(|r| r.fill == blue && r.rect.right() <= planning.left() && r.rect.top() <= planning.top() + 2.0),
+            "a calendar-colour bar leads the event"
+        );
+        let date = crate::frames::one(&texts, "Monday, 19 January");
+        assert!(date.top() > header.bottom() && date.bottom() < gym.top());
+    }
+
+    #[test]
+    fn day_pane_says_no_events_on_an_empty_day() {
+        let shapes = day_pane_frame(&[], None);
+        let texts = crate::frames::text_rects(&shapes, Rect::from_min_size(Pos2::ZERO, egui::vec2(280.0, 700.0)));
+        crate::frames::one(&texts, "No Events");
+    }
+
     #[test]
     fn year_shows_all_twelve_months_without_scrolling_like_apple() {
         // The calendar pane of the 1180x780 window is about 890x650.
         let context = egui::Context::default();
         theme::Theme::AppleLight.apply(&context);
         let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
-        let scene =
-            Scene { occ: &[], tz: chrono_tz::UTC, now: day.and_hms_opt(9, 0, 0).unwrap(), clock: Clock::H12, selected: None };
+        let scene = Scene {
+            occ: &[],
+            tz: chrono_tz::UTC,
+            now: day.and_hms_opt(9, 0, 0).unwrap(),
+            clock: Clock::H12,
+            selected: None,
+        };
         let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(890.0, 650.0));
         let mut shapes = Vec::new();
         for _ in 0..3 {

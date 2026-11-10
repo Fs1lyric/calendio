@@ -37,6 +37,8 @@ struct App {
     workspace: workspace::Workspace,
     quick_add: quick_add::QuickAdd,
     navigation: navigation::Navigation,
+    /// The large month in the Day view's right-hand pane.
+    day_month: navigation::Navigation,
     today: Vec<navigation::TodayItem>,
     recovery: recovery_ui::RecoveryUi,
     theme: theme::Theme,
@@ -70,6 +72,7 @@ impl App {
             workspace,
             quick_add: quick_add::QuickAdd::default(),
             navigation: navigation::Navigation::new(Utc::now().with_timezone(&tz).date_naive()),
+            day_month: navigation::Navigation::new(Utc::now().with_timezone(&tz).date_naive()),
             today: Vec::new(),
             recovery: recovery_ui::RecoveryUi::default(),
             tz,
@@ -126,6 +129,7 @@ impl App {
         self.booking = None;
         self.workspace.search_open = false;
         self.navigation.sync(anchor);
+        self.day_month.sync(anchor);
         if view != self.view && view != View::Month {
             self.scroll_to = Some(6.5 * views::HOUR_PX);
         }
@@ -529,7 +533,8 @@ impl App {
         if self.workspace.search_open {
             self.booking = None;
         }
-        let show_today = ui.available_width() >= 1440.0;
+        // Day view brings its own right-hand pane, so the Today panel stays out of it.
+        let show_today = ui.available_width() >= 1440.0 && self.view != View::Day;
         if sidebar_shown {
             let frame = egui::Frame::new().fill(theme::surface()).inner_margin(egui::Margin::symmetric(12, 14));
             egui::Panel::left("navigation").resizable(false).default_size(232.0).frame(frame).show(ui, |ui| {
@@ -599,8 +604,28 @@ impl eframe::App for App {
     }
 }
 
+/// The narrowest calendar area that still gets the Day view's right-hand pane.
+const DAY_PANE_MIN: f32 = 760.0;
+
 impl App {
     fn calendar(&mut self, ui: &mut egui::Ui) {
+        let mut pane_action = None;
+        if self.view == View::Day && ui.available_width() >= DAY_PANE_MIN {
+            let scene = Scene {
+                occ: &self.occ,
+                tz: self.tz,
+                now: self.now(),
+                clock: self.clock,
+                selected: self.editor.as_ref().and(self.selected.clone()),
+            };
+            let frame = egui::Frame::new().fill(theme::bg()).inner_margin(egui::Margin::symmetric(14, 0));
+            pane_action = egui::Panel::right("day-pane")
+                .resizable(false)
+                .default_size(280.0)
+                .frame(frame)
+                .show(ui, |ui| views::day_pane(ui, &scene, self.anchor, &mut self.day_month))
+                .inner;
+        }
         let action = egui::CentralPanel::default()
             .show(ui, |ui| {
                 let scene = Scene {
@@ -617,7 +642,8 @@ impl App {
                     v => views::time_grid(ui, &grid::days(v, self.anchor), &scene, &mut self.scroll_to),
                 }
             })
-            .inner;
+            .inner
+            .or(pane_action);
 
         match action {
             Some(Action::Open(k)) => self.open(k),
@@ -1218,6 +1244,24 @@ mod toolbar_tests {
         let mut app = App::new(Db::open_in_memory().unwrap(), chrono_tz::UTC);
         app.go(View::Month, NaiveDate::from_ymd_opt(2026, 11, 5).unwrap());
         app
+    }
+
+    #[test]
+    fn day_view_has_apples_month_and_events_pane_on_the_right() {
+        let mut app = november_app();
+        app.go(View::Day, NaiveDate::from_ymd_opt(2026, 11, 5).unwrap());
+        let texts = render(&mut app, 1180.0, 780.0);
+        // One mini month in the sidebar, one in the day pane on the right.
+        let months = find(&texts, "November 2026");
+        assert_eq!(months.len(), 2, "{months:?}");
+        assert!(months.iter().any(|r| r.left() > 800.0), "the pane is on the right");
+        let empty = one(&texts, "No Events");
+        assert!(empty.left() > 800.0);
+        // Week view keeps the whole width for the grid.
+        app.go(View::Week, NaiveDate::from_ymd_opt(2026, 11, 5).unwrap());
+        let texts = render(&mut app, 1180.0, 780.0);
+        assert_eq!(find(&texts, "November 2026").len(), 1);
+        assert!(find(&texts, "No Events").is_empty());
     }
 
     #[test]
