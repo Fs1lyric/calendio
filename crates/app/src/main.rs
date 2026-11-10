@@ -604,8 +604,9 @@ impl eframe::App for App {
     }
 }
 
-/// The narrowest calendar area that still gets the Day view's right-hand pane.
-const DAY_PANE_MIN: f32 = 760.0;
+/// The narrowest calendar area (in points; the default zoom is 1.25) that still
+/// gets the Day view's right-hand pane.
+const DAY_PANE_MIN: f32 = 640.0;
 
 impl App {
     fn calendar(&mut self, ui: &mut egui::Ui) {
@@ -621,7 +622,7 @@ impl App {
             let frame = egui::Frame::new().fill(theme::bg()).inner_margin(egui::Margin::symmetric(14, 0));
             pane_action = egui::Panel::right("day-pane")
                 .resizable(false)
-                .default_size(280.0)
+                .default_size(250.0)
                 .frame(frame)
                 .show(ui, |ui| views::day_pane(ui, &scene, self.anchor, &mut self.day_month))
                 .inner;
@@ -1250,16 +1251,17 @@ mod toolbar_tests {
     fn day_view_has_apples_month_and_events_pane_on_the_right() {
         let mut app = november_app();
         app.go(View::Day, NaiveDate::from_ymd_opt(2026, 11, 5).unwrap());
-        let texts = render(&mut app, 1180.0, 780.0);
+        // 1180x780 pixels at the default 1.25 zoom.
+        let texts = render(&mut app, 944.0, 624.0);
         // One mini month in the sidebar, one in the day pane on the right.
         let months = find(&texts, "November 2026");
         assert_eq!(months.len(), 2, "{months:?}");
-        assert!(months.iter().any(|r| r.left() > 800.0), "the pane is on the right");
+        assert!(months.iter().any(|r| r.left() > 640.0), "the pane is on the right");
         let empty = one(&texts, "No Events");
-        assert!(empty.left() > 800.0);
+        assert!(empty.left() > 640.0);
         // Week view keeps the whole width for the grid.
         app.go(View::Week, NaiveDate::from_ymd_opt(2026, 11, 5).unwrap());
-        let texts = render(&mut app, 1180.0, 780.0);
+        let texts = render(&mut app, 944.0, 624.0);
         assert_eq!(find(&texts, "November 2026").len(), 1);
         assert!(find(&texts, "No Events").is_empty());
     }

@@ -705,42 +705,54 @@ pub fn year(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
     // (four to a row), with the day rows shrunk to the height available.
     const MARGIN: f32 = 8.0;
     const GAP: f32 = 12.0;
-    // Month name, the gap under it, the weekday letters, the card margins and
-    // egui's spacing between those four pieces.
-    let card_chrome = 22.0 + 4.0 + 16.0 + 2.0 * MARGIN + 3.0 * ui.spacing().item_spacing.y;
-    let columns = (((ui.available_width() - 14.0) / 200.0) as usize).clamp(1, 4);
+    let columns = (((ui.available_width() - 14.0) / 170.0) as usize).clamp(1, 4);
     let card_width =
-        ((ui.available_width() - 14.0 - GAP * (columns - 1) as f32) / columns as f32 - 2.0 * MARGIN).max(150.0);
+        ((ui.available_width() - 14.0 - GAP * (columns - 1) as f32) / columns as f32 - 2.0 * MARGIN).max(140.0);
     let cell_width = (card_width - 12.0) / 7.0;
-    let row_h = if columns >= 3 {
+    // With three or four months to a row, every card gets an equal share of the
+    // height; the day rows take whatever the month name and weekday letters leave.
+    let compact = columns >= 3;
+    // Tighter vertical chrome when the whole year shares the height.
+    let (v_margin, v_gap) = if compact { (4.0, 6.0) } else { (MARGIN, GAP) };
+    let card_h = compact.then(|| {
         let rows = 12usize.div_ceil(columns) as f32;
-        (((ui.available_height() - GAP * (rows - 1.0)) / rows - card_chrome) / 6.0).clamp(16.0, 26.0)
-    } else {
-        26.0
-    };
-    let radius = (row_h / 2.0 - 1.5).min(cell_width / 2.0 - 1.0).min(11.0);
+        (ui.available_height() - v_gap * (rows - 1.0)) / rows - 2.0 * v_margin
+    });
+    let spacing = ui.spacing().item_spacing.y;
     let mut action = None;
     let busy = year_busy_days(s, anchor);
     egui::ScrollArea::vertical().show(ui, |ui| {
-        egui::Grid::new("year-grid").num_columns(columns).spacing([GAP, GAP]).show(ui, |ui| {
+        egui::Grid::new("year-grid").num_columns(columns).spacing([GAP, v_gap]).show(ui, |ui| {
             for month in 1..=12 {
                 let first = NaiveDate::from_ymd_opt(anchor.year(), month, 1).expect("valid month");
                 // Apple's year: no tiles, the month name in red for the current
                 // month, plain day numbers, today white in a red circle, and a
                 // small dot under days that have events.
-                egui::Frame::new().inner_margin(MARGIN).show(ui, |ui| {
+                egui::Frame::new().inner_margin(egui::Margin::symmetric(MARGIN as i8, v_margin as i8)).show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.set_width(card_width);
+                        let card_top = ui.cursor().top();
                         let current = month == s.now.month() && anchor.year() == s.now.year();
                         let name_colour = if current { theme::today() } else { theme::ink() };
                         ui.label(
                             egui::RichText::new(first.format("%B").to_string())
-                                .font(theme::semibold(17.0))
+                                .font(theme::semibold(if card_h.is_some() { 15.0 } else { 17.0 }))
                                 .color(name_colour),
                         );
-                        ui.add_space(4.0);
-                        let size = if cell_width > 36.0 { 13.0 } else { 12.0 };
-                        let (head, _) = ui.allocate_exact_size(egui::vec2(cell_width * 7.0, 16.0), Sense::hover());
+                        if !compact {
+                            ui.add_space(4.0);
+                        }
+                        let size = if cell_width > 36.0 {
+                            13.0
+                        } else if card_h.is_some() {
+                            11.5
+                        } else {
+                            12.0
+                        };
+                        let (head, _) = ui.allocate_exact_size(
+                            egui::vec2(cell_width * 7.0, if compact { 13.0 } else { 16.0 }),
+                            Sense::hover(),
+                        );
                         for (i, name) in ["M", "T", "W", "T", "F", "S", "S"].iter().enumerate() {
                             let x = head.left() + cell_width * (i as f32 + 0.5);
                             ui.painter().text(
@@ -751,6 +763,12 @@ pub fn year(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
                                 theme::ink_3(),
                             );
                         }
+                        let row_h = card_h
+                            .map(|h| ((card_top + h - ui.cursor().top() - spacing) / 6.0).clamp(14.0, 26.0))
+                            .unwrap_or(26.0);
+                        let radius = (row_h / 2.0 - 1.5).max(8.5).min(cell_width / 2.0 - 1.0).min(11.0);
+                        // Leave the busy dot its own room under the number.
+                        let lift = if row_h < 22.0 { 2.5 } else { 1.0 };
                         let start = grid::week_start(first);
                         let (body, _) =
                             ui.allocate_exact_size(egui::vec2(cell_width * 7.0, row_h * 6.0), Sense::hover());
@@ -767,7 +785,7 @@ pub fn year(ui: &mut Ui, s: &Scene, anchor: NaiveDate) -> Option<Action> {
                                 egui::vec2(cell_width, row_h),
                             );
                             let resp = ui.interact(cell, Id::new(("year-day", day)), Sense::click());
-                            let centre = Pos2::new(cell.center().x, cell.center().y - 1.0);
+                            let centre = Pos2::new(cell.center().x, cell.center().y - lift);
                             let p = ui.painter();
                             let is_today = day == s.now.date();
                             let (ink, number_font) = if is_today {
@@ -1076,7 +1094,8 @@ mod tests {
 
     #[test]
     fn year_shows_all_twelve_months_without_scrolling_like_apple() {
-        // The calendar pane of the 1180x780 window is about 890x650.
+        // The calendar pane of the 1180x780 window at the default 1.25 zoom is
+        // about 712x528 points, less the central panel's margins.
         let context = egui::Context::default();
         theme::Theme::AppleLight.apply(&context);
         let day = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
@@ -1087,7 +1106,7 @@ mod tests {
             clock: Clock::H12,
             selected: None,
         };
-        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(890.0, 650.0));
+        let screen = Rect::from_min_size(Pos2::ZERO, egui::vec2(700.0, 505.0));
         let mut shapes = Vec::new();
         for _ in 0..3 {
             let mut output = context.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
@@ -1103,7 +1122,7 @@ mod tests {
         assert!((january.top() - april.top()).abs() < 2.0, "four months to a row");
         // December's last row (the 28th–31st) is fully on screen.
         let last = crate::frames::find(&texts, "31").into_iter().map(|r| r.bottom()).fold(0.0, f32::max);
-        assert!(december.bottom() < 650.0 && last < 650.0, "December ends at {last}, below the 650 px pane");
+        assert!(december.bottom() < 505.0 && last < 505.0, "December ends at {last}, below the 505-point pane");
     }
 
     #[test]
