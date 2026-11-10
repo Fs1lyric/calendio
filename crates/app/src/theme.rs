@@ -273,18 +273,24 @@ pub fn event_colors(colour: Color32, selected: bool) -> EventColors {
         let title = readable_shade(colour, fill, Color32::WHITE, 0.35);
         return EventColors { fill, bar: colour, title, detail: title };
     }
-    let fill = bg().lerp_to_gamma(colour, 0.15);
+    let fill = bg().lerp_to_gamma(colour, if is_pastel(colour) { 0.6 } else { 0.15 });
     let title = readable_shade(colour, fill, Color32::BLACK, 0.5);
-    let detail = colour.lerp_to_gamma(Color32::BLACK, 0.2);
+    // Lighter than the title, but still 3:1 on the fill (pastels need the push).
+    let detail = shade_to(colour, fill, Color32::BLACK, 0.2, 3.0);
     EventColors { fill, bar: colour, title, detail }
 }
 
 /// `colour` mixed towards `toward`, a little at a time, until it reads on `on`.
 fn readable_shade(colour: Color32, on: Color32, toward: Color32, start: f32) -> Color32 {
+    shade_to(colour, on, toward, start, 4.5)
+}
+
+/// `colour` mixed towards `toward` from `start` until it reaches `min` contrast on `on`.
+fn shade_to(colour: Color32, on: Color32, toward: Color32, start: f32, min: f32) -> Color32 {
     let mut t = start;
     loop {
         let shade = colour.lerp_to_gamma(toward, t);
-        if contrast(shade, on) >= 4.5 || t >= 1.0 {
+        if contrast(shade, on) >= min || t >= 1.0 {
             return shade;
         }
         t = (t + 0.05_f32).min(1.0);
@@ -293,8 +299,8 @@ fn readable_shade(colour: Color32, on: Color32, toward: Color32, start: f32) -> 
 
 /// Time block and calendar colours, stored as `#rrggbb`: iPadOS 26 Calendar's
 /// seven calendar colours, which are iOS 26's system colours (sampled from
-/// Apple's own screenshots in spec/reference/ipad).
-pub const SWATCHES: [(&str, &str); 7] = [
+/// Apple's own screenshots in spec/reference/ipad), then the seven pastels.
+pub const SWATCHES: [(&str, &str); 14] = [
     ("Red", "#ff383c"),
     ("Orange", "#ff8d28"),
     ("Yellow", "#ffcc00"),
@@ -302,12 +308,31 @@ pub const SWATCHES: [(&str, &str); 7] = [
     ("Blue", "#0088ff"),
     ("Purple", "#cb30e0"),
     ("Brown", "#ac7f5e"),
+    ("Lilac", "#f4c3e8"),
+    ("Blush", "#f48aab"),
+    ("Seafoam", "#a5e0ca"),
+    ("Cream", "#f5dfb4"),
+    ("Sky", "#89b3f9"),
+    ("Aqua", "#96dfcd"),
+    ("Slate", "#b2bad1"),
 ];
 
-/// Colours Calendio used to offer (system colours, the old calendar defaults
-/// and the pastels), each drawn as its nearest Apple Calendar colour so old
+/// How many of [`SWATCHES`] are Apple's; the rest are the pastels.
+pub const APPLE: usize = 7;
+
+/// A soft, light colour (low saturation, high value), like the pastels. Apple's
+/// 15% tint would leave these nearly white, so their blocks fill stronger.
+pub fn is_pastel(c: Color32) -> bool {
+    let (r, g, b) = (f32::from(c.r()), f32::from(c.g()), f32::from(c.b()));
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    max > 0.75 * 255.0 && (max - min) / max < 0.5
+}
+
+/// Colours Calendio used to offer (system colours and the old calendar
+/// defaults), each drawn as its nearest Apple Calendar colour so old
 /// blocks match without rewriting anyone's data.
-const LEGACY: [(u32, u32); 26] = [
+const LEGACY: [(u32, u32); 19] = [
     (0x2457b2, 0x0088ff),
     (0x1badf8, 0x0088ff),
     (0xff2968, 0xff383c),
@@ -327,13 +352,6 @@ const LEGACY: [(u32, u32); 26] = [
     (0xd64933, 0xff383c),
     (0x2e8b57, 0x34c759),
     (0x8a4fd8, 0xcb30e0),
-    (0xf4c3e8, 0xcb30e0),
-    (0xf48aab, 0xff383c),
-    (0xa5e0ca, 0x34c759),
-    (0xf5dfb4, 0xffcc00),
-    (0x89b3f9, 0x0088ff),
-    (0x96dfcd, 0x34c759),
-    (0xb2bad1, 0xac7f5e),
 ];
 
 /// A stored `#rrggbb` as the colour to paint: Apple's dark variant on a dark
@@ -487,13 +505,6 @@ mod tests {
             ("#d64933", "#ff383c"),
             ("#2e8b57", "#34c759"),
             ("#8a4fd8", "#cb30e0"),
-            ("#f4c3e8", "#cb30e0"), // Lilac
-            ("#f48aab", "#ff383c"), // Blush
-            ("#a5e0ca", "#34c759"), // Seafoam
-            ("#f5dfb4", "#ffcc00"), // Cream
-            ("#89b3f9", "#0088ff"), // Sky
-            ("#96dfcd", "#34c759"), // Aqua
-            ("#b2bad1", "#ac7f5e"), // Slate
         ];
         for theme in [Theme::AppleLight, Theme::AppleDark] {
             theme.apply(&egui::Context::default());
@@ -501,7 +512,7 @@ mod tests {
                 assert_eq!(hex(Some(old)), hex(Some(apple)), "{old} in {theme:?}");
                 assert_eq!(hex(Some(&old.to_uppercase())), hex(Some(apple)), "case does not matter");
             }
-            // Apple Calendar draws the same colour on light and dark.
+            // Every swatch, Apple's and the pastels, draws as stored on light and dark.
             for (_, apple) in SWATCHES {
                 assert_eq!(hex(Some(apple)), Color32::from_hex(apple).unwrap(), "{apple} in {theme:?}");
             }
@@ -509,6 +520,20 @@ mod tests {
         }
         Theme::AppleLight.apply(&egui::Context::default());
         assert_eq!(hex(Some("#123456")), rgb(0x123456), "a custom colour is left alone");
+    }
+
+    #[test]
+    fn pastel_blocks_read_as_pastel_not_white_on_light() {
+        Theme::AppleLight.apply(&egui::Context::default());
+        for (_, pastel) in &SWATCHES[APPLE..] {
+            let colour = hex(Some(pastel));
+            assert!(is_pastel(colour), "{pastel} counts as a pastel");
+            let fill = event_colors(colour, false).fill;
+            assert!(luminance(bg()) - luminance(fill) > 0.08, "{pastel} fill is visibly tinted");
+        }
+        for (_, apple) in &SWATCHES[..APPLE] {
+            assert!(!is_pastel(hex(Some(apple))), "{apple} is not a pastel");
+        }
     }
 
     /// Apple's system colours plus every swatch an event can pick.
@@ -528,6 +553,8 @@ mod tests {
             theme.apply(&egui::Context::default());
             for colour in event_palette() {
                 let c = event_colors(colour, false);
+                // A pastel at Apple's 15% is nearly white, so light pastels fill at 60%.
+                let alpha = if theme == Theme::AppleLight && is_pastel(colour) { 0.6 } else { alpha };
                 assert_eq!(c.fill, bg().lerp_to_gamma(colour, alpha), "{colour:?} fill in {}", theme.label());
                 assert_eq!(c.bar, colour, "the bar is the calendar colour");
                 assert!(contrast(c.title, c.fill) >= 4.5, "{colour:?} title is readable in {}", theme.label());
@@ -538,6 +565,7 @@ mod tests {
                         assert_eq!(c.title, colour.lerp_to_gamma(Color32::BLACK, 0.5), "{colour:?} title");
                     }
                     assert!(luminance(c.detail) > luminance(c.title), "{colour:?} time line is lighter");
+                    assert!(contrast(c.detail, c.fill) >= 3.0, "{colour:?} time line still reads");
                 } else {
                     assert_eq!(c.detail, c.title);
                 }

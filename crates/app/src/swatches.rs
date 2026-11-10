@@ -33,7 +33,7 @@ fn swatch(ui: &mut Ui, fill: Color32, chosen: bool, name: &str) -> bool {
 
 /// The colour picker. `colour` is `None` for "the calendar's colour", which is
 /// offered first as `calendar` when given. Apple's colours sit on the first row,
-/// then a custom colour. Returns whether it changed.
+/// the pastels on the second, then a custom colour. Returns whether it changed.
 pub fn picker(ui: &mut Ui, colour: &mut Option<String>, calendar: Option<Color32>) -> bool {
     let before = colour.clone();
     ui.vertical(|ui| {
@@ -44,13 +44,18 @@ pub fn picker(ui: &mut Ui, colour: &mut Option<String>, calendar: Option<Color32
                     *colour = None;
                 }
             }
-            for (name, hex) in &theme::SWATCHES {
+            for (name, hex) in &theme::SWATCHES[..theme::APPLE] {
                 if swatch(ui, theme::hex(Some(hex)), colour.as_deref().is_some_and(|c| same(c, hex)), name) {
                     *colour = Some((*hex).to_string());
                 }
             }
         });
         ui.horizontal_wrapped(|ui| {
+            for (name, hex) in &theme::SWATCHES[theme::APPLE..] {
+                if swatch(ui, theme::hex(Some(hex)), colour.as_deref().is_some_and(|c| same(c, hex)), name) {
+                    *colour = Some((*hex).to_string());
+                }
+            }
             let custom = colour.as_deref().is_some_and(|c| !theme::SWATCHES.iter().any(|(_, h)| same(c, h)));
             let current = colour.as_deref().map(|c| theme::hex(Some(c))).or(calendar).unwrap_or(theme::accent());
             let mut rgb = [current.r(), current.g(), current.b()];
@@ -156,11 +161,11 @@ mod tests {
     }
 
     #[test]
-    fn the_picker_offers_exactly_apple_calendars_seven_colours() {
+    fn the_picker_offers_apples_seven_colours_then_the_seven_pastels() {
         // iPadOS 26 Calendar's calendar colours: iOS 26's system colours, sampled
         // from Apple's own iPad Calendar screenshots (spec/reference/ipad).
         assert_eq!(
-            theme::SWATCHES,
+            theme::SWATCHES[..theme::APPLE],
             [
                 ("Red", "#ff383c"),
                 ("Orange", "#ff8d28"),
@@ -171,6 +176,27 @@ mod tests {
                 ("Brown", "#ac7f5e"),
             ]
         );
+        // The person's pastels, kept on a second row.
+        assert_eq!(
+            theme::SWATCHES[theme::APPLE..],
+            [
+                ("Lilac", "#f4c3e8"),
+                ("Blush", "#f48aab"),
+                ("Seafoam", "#a5e0ca"),
+                ("Cream", "#f5dfb4"),
+                ("Sky", "#89b3f9"),
+                ("Aqua", "#96dfcd"),
+                ("Slate", "#b2bad1"),
+            ]
+        );
+    }
+
+    #[test]
+    fn pastels_sit_on_the_second_row_under_apples_colours() {
+        let shapes = run(&mut None, None, None);
+        let red = circle_of(&shapes, theme::hex(Some("#ff383c")));
+        let lilac = circle_of(&shapes, theme::hex(Some("#f4c3e8")));
+        assert!(lilac.y > red.y + 10.0, "pastels are a row below");
     }
 
     #[test]
