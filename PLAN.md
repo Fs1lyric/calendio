@@ -182,7 +182,7 @@ Done on branch `more-apple` (pushed, installed with `./install.sh --build`, not 
 - Exact Apple Calendar colours: `theme::SWATCHES` = the 7 iCloud calendar colours, same on light/dark;
   `theme::LEGACY` maps older stored colours onto them at draw time (no data rewrite).
 
-Before pixel work: reference screenshots go in `spec/reference/ipad/` (Day, Week, Month, Year, event
+Reference screenshots are in `spec/reference/ipad/` (Apple's own, from its iPad guide) with measurements and the to-do list in NOTES.md; colours are DONE. Next: (Day, Week, Month, Year, event
 detail/editor, calendars list; light + dark). Measure from them (fonts, sizes, paddings, colours of
 grid lines, fills, today marker, toolbar) and write the numbers into `spec/reference/ipad/NOTES.md`,
 then match view by view, test first, screenshot-compare each.
