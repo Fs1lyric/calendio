@@ -194,7 +194,7 @@ fn import_calendar(db: &Db) -> Result<i64, String> {
             return Ok(id);
         }
     }
-    let id = db.create_calendar("Google Calendar", "#007aff").map_err(failure)?;
+    let id = db.create_calendar("Google Calendar", "#1badf8").map_err(failure)?;
     db.set_setting("google_import_calendar", &id.to_string()).map_err(failure)?;
     Ok(id)
 }

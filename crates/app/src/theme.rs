@@ -281,76 +281,55 @@ fn readable_shade(colour: Color32, on: Color32, toward: Color32) -> Color32 {
     }
 }
 
-/// Time block colours, stored on the event as `#rrggbb`: Apple Calendar's
-/// thirteen system colours.
-pub const SWATCHES: [(&str, &str); 13] = [
-    ("Red", "#ff3b30"),
+/// Time block and calendar colours, stored as `#rrggbb`: Apple Calendar's
+/// seven calendar colours, exactly as iCloud stores them. Apple draws them the
+/// same on light and dark.
+pub const SWATCHES: [(&str, &str); 7] = [
+    ("Red", "#ff2968"),
     ("Orange", "#ff9500"),
     ("Yellow", "#ffcc00"),
-    ("Green", "#34c759"),
-    ("Mint", "#00c7be"),
-    ("Teal", "#30b0c7"),
-    ("Cyan", "#32ade6"),
-    ("Blue", "#007aff"),
-    ("Indigo", "#5856d6"),
-    ("Purple", "#af52de"),
-    ("Pink", "#ff2d55"),
+    ("Green", "#63da38"),
+    ("Blue", "#1badf8"),
+    ("Purple", "#cc73e1"),
     ("Brown", "#a2845e"),
-    ("Graphite", "#8e8e93"),
 ];
 
-/// Colours Calendio used to offer (the old calendar defaults and the seven
-/// pastels), each drawn as its nearest Apple system colour so old blocks look
-/// like Apple's without rewriting anyone's data.
-const LEGACY: [(u32, u32); 11] = [
-    (0x2457b2, 0x007aff),
-    (0xd64933, 0xff3b30),
-    (0x2e8b57, 0x34c759),
-    (0x8a4fd8, 0xaf52de),
-    (0xf4c3e8, 0xaf52de),
-    (0xf48aab, 0xff2d55),
-    (0xa5e0ca, 0x34c759),
+/// Colours Calendio used to offer (system colours, the old calendar defaults
+/// and the pastels), each drawn as its nearest Apple Calendar colour so old
+/// blocks match without rewriting anyone's data.
+const LEGACY: [(u32, u32); 21] = [
+    (0x2457b2, 0x1badf8),
+    (0x007aff, 0x1badf8),
+    (0x32ade6, 0x1badf8),
+    (0x30b0c7, 0x1badf8),
+    (0x00c7be, 0x63da38),
+    (0x34c759, 0x63da38),
+    (0xff3b30, 0xff2968),
+    (0xff2d55, 0xff2968),
+    (0x5856d6, 0xcc73e1),
+    (0xaf52de, 0xcc73e1),
+    (0x8e8e93, 0xa2845e),
+    (0xd64933, 0xff2968),
+    (0x2e8b57, 0x63da38),
+    (0x8a4fd8, 0xcc73e1),
+    (0xf4c3e8, 0xcc73e1),
+    (0xf48aab, 0xff2968),
+    (0xa5e0ca, 0x63da38),
     (0xf5dfb4, 0xffcc00),
-    (0x89b3f9, 0x32ade6),
-    (0x96dfcd, 0x00c7be),
-    (0xb2bad1, 0x8e8e93),
-];
-
-/// How many of [`SWATCHES`] are Apple's system colours.
-pub const VIVID: usize = 13;
-
-/// Apple's dark-mode variant of each system colour, which it swaps in on a
-/// dark canvas so blocks stay bright without glaring.
-const DARK_VARIANTS: [(u32, u32); VIVID] = [
-    (0xff3b30, 0xff453a),
-    (0xff9500, 0xff9f0a),
-    (0xffcc00, 0xffd60a),
-    (0x34c759, 0x30d158),
-    (0x00c7be, 0x63e6e2),
-    (0x30b0c7, 0x40c8e0),
-    (0x32ade6, 0x64d2ff),
-    (0x007aff, 0x0a84ff),
-    (0x5856d6, 0x5e5ce6),
-    (0xaf52de, 0xbf5af2),
-    (0xff2d55, 0xff375f),
-    (0xa2845e, 0xac8e68),
-    (0x8e8e93, 0x98989d),
+    (0x89b3f9, 0x1badf8),
+    (0x96dfcd, 0x63da38),
+    (0xb2bad1, 0xa2845e),
 ];
 
 /// A stored `#rrggbb` as the colour to paint: Apple's dark variant on a dark
 /// canvas, otherwise as stored.
 pub fn hex(s: Option<&str>) -> Color32 {
-    let c = s.and_then(|s| Color32::from_hex(&s.to_lowercase()).ok()).unwrap_or(Color32::from_rgb(0x00, 0x7a, 0xff));
-    let mut n = u32::from(c.r()) << 16 | u32::from(c.g()) << 8 | u32::from(c.b());
-    if let Some(&(_, apple)) = LEGACY.iter().find(|(old, _)| *old == n) {
-        n = apple;
+    let c = s.and_then(|s| Color32::from_hex(&s.to_lowercase()).ok()).unwrap_or(Color32::from_rgb(0x1b, 0xad, 0xf8));
+    let n = u32::from(c.r()) << 16 | u32::from(c.g()) << 8 | u32::from(c.b());
+    match LEGACY.iter().find(|(old, _)| *old == n) {
+        Some(&(_, apple)) => Color32::from_rgb((apple >> 16) as u8, (apple >> 8) as u8, apple as u8),
+        None => c,
     }
-    if is_dark() {
-        if let Some(&(_, d)) = DARK_VARIANTS.iter().find(|(l, _)| *l == n) {
-            n = d;
-        }
-    }
-    Color32::from_rgb((n >> 16) as u8, (n >> 8) as u8, n as u8)
 }
 
 /// A colour faded into the background, for event fills.
@@ -472,19 +451,29 @@ mod tests {
     }
 
     #[test]
-    fn old_colours_are_drawn_as_their_apple_system_colour() {
+    fn old_colours_are_drawn_as_their_apple_calendar_colour() {
         let pairs = [
-            ("#2457b2", "#007aff"), // the old Personal navy
-            ("#d64933", "#ff3b30"),
-            ("#2e8b57", "#34c759"),
-            ("#8a4fd8", "#af52de"),
-            ("#f4c3e8", "#af52de"), // Lilac
-            ("#f48aab", "#ff2d55"), // Blush
-            ("#a5e0ca", "#34c759"), // Seafoam
+            ("#2457b2", "#1badf8"), // the old Personal navy
+            ("#007aff", "#1badf8"),
+            ("#32ade6", "#1badf8"),
+            ("#30b0c7", "#1badf8"),
+            ("#00c7be", "#63da38"),
+            ("#34c759", "#63da38"),
+            ("#ff3b30", "#ff2968"),
+            ("#ff2d55", "#ff2968"),
+            ("#5856d6", "#cc73e1"),
+            ("#af52de", "#cc73e1"),
+            ("#8e8e93", "#a2845e"),
+            ("#d64933", "#ff2968"),
+            ("#2e8b57", "#63da38"),
+            ("#8a4fd8", "#cc73e1"),
+            ("#f4c3e8", "#cc73e1"), // Lilac
+            ("#f48aab", "#ff2968"), // Blush
+            ("#a5e0ca", "#63da38"), // Seafoam
             ("#f5dfb4", "#ffcc00"), // Cream
-            ("#89b3f9", "#32ade6"), // Sky
-            ("#96dfcd", "#00c7be"), // Aqua
-            ("#b2bad1", "#8e8e93"), // Slate
+            ("#89b3f9", "#1badf8"), // Sky
+            ("#96dfcd", "#63da38"), // Aqua
+            ("#b2bad1", "#a2845e"), // Slate
         ];
         for theme in [Theme::AppleLight, Theme::AppleDark] {
             theme.apply(&egui::Context::default());
@@ -492,12 +481,14 @@ mod tests {
                 assert_eq!(hex(Some(old)), hex(Some(apple)), "{old} in {theme:?}");
                 assert_eq!(hex(Some(&old.to_uppercase())), hex(Some(apple)), "case does not matter");
             }
-            // No colour at all is Apple blue too.
-            assert_eq!(hex(None), hex(Some("#007aff")));
+            // Apple Calendar draws the same colour on light and dark.
+            for (_, apple) in SWATCHES {
+                assert_eq!(hex(Some(apple)), Color32::from_hex(apple).unwrap(), "{apple} in {theme:?}");
+            }
+            assert_eq!(hex(None), rgb(0x1badf8), "no colour is Apple Calendar blue");
         }
-        // A custom colour the person picked is left alone.
         Theme::AppleLight.apply(&egui::Context::default());
-        assert_eq!(hex(Some("#123456")), rgb(0x123456));
+        assert_eq!(hex(Some("#123456")), rgb(0x123456), "a custom colour is left alone");
     }
 
     /// Apple's system colours plus every swatch an event can pick.
@@ -523,17 +514,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn apple_colours_switch_to_their_dark_variants_on_a_dark_canvas() {
-        Theme::AppleLight.apply(&egui::Context::default());
-        assert_eq!(hex(Some("#ff3b30")), rgb(0xff3b30));
-        assert_eq!(hex(Some("#007AFF")), rgb(0x007aff));
-        Theme::AppleDark.apply(&egui::Context::default());
-        assert_eq!(hex(Some("#ff3b30")), rgb(0xff453a));
-        assert_eq!(hex(Some("#007aff")), rgb(0x0a84ff));
-        assert_eq!(hex(Some("#123456")), rgb(0x123456), "custom colours stay as stored");
     }
 
     #[test]

@@ -1363,7 +1363,7 @@ mod sidebar_tests {
     fn app_with_calendars() -> (App, i64, i64) {
         let db = Db::open_in_memory().unwrap();
         let work = db.create_calendar("Work", "#ff9500").unwrap();
-        let hidden = db.create_calendar("Hobbies", "#34c759").unwrap();
+        let hidden = db.create_calendar("Hobbies", "#63da38").unwrap();
         db.update_calendar(hidden, "Hobbies", "#34c759", false).unwrap();
         let mut app = App::new(db, chrono_tz::UTC);
         let today = app.now().date();
@@ -1390,7 +1390,7 @@ mod sidebar_tests {
         assert!(header.left() < SIDEBAR);
         let mut above = header.bottom();
         for (name, colour, visible) in
-            [("Personal", "#007aff", true), ("Work", "#ff9500", true), ("Hobbies", "#34c759", false)]
+            [("Personal", "#1badf8", true), ("Work", "#ff9500", true), ("Hobbies", "#63da38", false)]
         {
             let rect = one(&texts, name);
             assert!(rect.left() < SIDEBAR && rect.top() >= above, "{name} is listed under My Calendars, in order");

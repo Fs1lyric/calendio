@@ -1180,7 +1180,7 @@ mod tests {
 
     #[test]
     fn right_clicking_a_block_offers_every_colour_and_picking_one_recolours_it() {
-        let occ = [event(7, "Standup", "2026-10-21T09:00:00Z", "2026-10-21T10:00:00Z", "#007aff")];
+        let occ = [event(7, "Standup", "2026-10-21T09:00:00Z", "2026-10-21T10:00:00Z", "#1badf8")];
         let context = egui::Context::default();
         theme::Theme::AppleLight.apply(&context);
         let monday = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
@@ -1569,8 +1569,8 @@ mod tests {
 
     #[test]
     fn month_all_day_events_are_solid_pills() {
-        let purple = Color32::from_rgb(0xaf, 0x52, 0xde);
-        let (shapes, screen) = month_frame(&[event(2, "Trip", "2026-10-23", "2026-10-25", "#af52de")]);
+        let purple = Color32::from_rgb(0xcc, 0x73, 0xe1);
+        let (shapes, screen) = month_frame(&[event(2, "Trip", "2026-10-23", "2026-10-25", "#cc73e1")]);
         let texts = crate::frames::text_rects(&shapes, screen);
         let trips = crate::frames::find(&texts, "Trip");
         assert_eq!(trips.len(), 1, "one joined pill labels the trip once");

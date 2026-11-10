@@ -156,18 +156,20 @@ mod tests {
     }
 
     #[test]
-    fn the_picker_offers_exactly_apples_thirteen_colours() {
-        let names: Vec<&str> = theme::SWATCHES.iter().map(|s| s.0).collect();
+    fn the_picker_offers_exactly_apple_calendars_seven_colours() {
+        // Apple Calendar's calendar colours, as iCloud stores them.
         assert_eq!(
-            names,
+            theme::SWATCHES,
             [
-                "Red", "Orange", "Yellow", "Green", "Mint", "Teal", "Cyan", "Blue", "Indigo", "Purple", "Pink",
-                "Brown", "Graphite"
+                ("Red", "#ff2968"),
+                ("Orange", "#ff9500"),
+                ("Yellow", "#ffcc00"),
+                ("Green", "#63da38"),
+                ("Blue", "#1badf8"),
+                ("Purple", "#cc73e1"),
+                ("Brown", "#a2845e"),
             ]
         );
-        // The old pastels are gone from the picker; blocks that still carry
-        // one are drawn in its Apple colour instead (see theme::hex).
-        assert!(!theme::SWATCHES.iter().any(|s| s.1 == "#f5dfb4"));
     }
 
     #[test]
@@ -183,10 +185,10 @@ mod tests {
     #[test]
     fn clicking_a_swatch_picks_it_and_checks_it() {
         let mut colour = None;
-        let blue = theme::hex(Some("#007aff"));
+        let blue = theme::hex(Some("#1badf8"));
         let at = circle_of(&run(&mut colour.clone(), None, None), blue);
         let shapes = run(&mut colour, None, Some(at));
-        assert_eq!(colour.as_deref(), Some("#007aff"));
+        assert_eq!(colour.as_deref(), Some("#1badf8"));
         let near_blue = crate::frames::flat(&shapes).into_iter().any(|(_, s)| match s {
             egui::Shape::Path(p) => {
                 p.points.iter().all(|q| q.distance(at) < RADIUS)
